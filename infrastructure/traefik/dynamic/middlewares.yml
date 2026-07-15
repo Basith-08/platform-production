@@ -1,0 +1,20 @@
+# Traefik dynamic configuration — shared middlewares available to any
+# application via Traefik labels (e.g. traefik.http.routers.<name>.middlewares=secure-headers@file).
+#
+# Reference: docs/01-architecture/ARCH-007-security-architecture.md
+
+http:
+  middlewares:
+    secure-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        frameDeny: true
+
+    dashboard-auth:
+      basicAuth:
+        usersFile: /etc/traefik/dynamic/dashboard-users.htpasswd

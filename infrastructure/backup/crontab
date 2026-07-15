@@ -1,0 +1,8 @@
+# Backup schedule, installed on the production server during OPS-001 —
+# Server Provisioning.
+#
+# Reference: docs/01-architecture/ARCH-008-backup-architecture.md, Section 5
+#            docs/04-operations/OPS-004-backup.md
+
+# Daily full backup run at 03:00 UTC (low-traffic window).
+0 3 * * * deploy /srv/platform-production/infrastructure/backup/run-backup.sh >> /var/log/platform-backup.log 2>&1

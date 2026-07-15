@@ -1,0 +1,57 @@
+# Traefik — platform reverse proxy and TLS terminator.
+#
+# Reference: docs/01-architecture/ARCH-004-network-architecture.md
+#            docs/02-decisions/ADR-0006-traefik.md
+#            docs/03-standards/STD-001-compose-standard.md
+
+services:
+  traefik:
+    image: traefik:v3.1
+    restart: unless-stopped
+    env_file: .env
+    command:
+      - "--configFile=/etc/traefik/traefik.yml"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./dynamic:/etc/traefik/dynamic:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certs:/letsencrypt
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - edge
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.${PLATFORM_DOMAIN}`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.dashboard.middlewares=dashboard-auth@file,secure-headers@file"
+
+volumes:
+  traefik-certs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /srv/platform/traefik/certs
+
+networks:
+  edge:
+    external: true

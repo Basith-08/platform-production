@@ -1,0 +1,115 @@
+# Beszel (resource metrics) and Uptime Kuma (availability monitoring).
+#
+# Reference: docs/01-architecture/ARCH-009-monitoring-architecture.md
+#            docs/02-decisions/ADR-0009-monitoring-stack.md
+#            docs/03-standards/STD-001-compose-standard.md
+
+services:
+  beszel:
+    image: henrygd/beszel:0.11.1
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - beszel-data:/beszel_data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - edge
+      - platform-internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.beszel.rule=Host(`beszel.${PLATFORM_DOMAIN}`)"
+      - "traefik.http.routers.beszel.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.beszel.middlewares=secure-headers@file"
+      - "traefik.http.services.beszel.loadbalancer.server.port=8090"
+
+  beszel-agent:
+    image: henrygd/beszel-agent:0.11.1
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-internal
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1.23
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - kuma-data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "extra/healthcheck.js"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - edge
+      - platform-internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.uptime-kuma.rule=Host(`status.${PLATFORM_DOMAIN}`)"
+      - "traefik.http.routers.uptime-kuma.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.uptime-kuma.middlewares=secure-headers@file"
+      - "traefik.http.services.uptime-kuma.loadbalancer.server.port=3001"
+
+volumes:
+  beszel-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /srv/platform/monitoring/beszel-data
+  kuma-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /srv/platform/monitoring/kuma-data
+
+networks:
+  edge:
+    external: true
+  platform-internal:
+    external: true

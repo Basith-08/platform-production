@@ -1,0 +1,43 @@
+# Frontend application template compose.yaml.
+#
+# Replace app-name with the application's canonical kebab-case name
+# throughout this file, per docs/03-standards/STD-002-naming-convention.md.
+#
+# Reference: docs/03-standards/STD-001-compose-standard.md
+
+services:
+  web:
+    image: ghcr.io/org/app-name:${IMAGE_TAG}
+    restart: unless-stopped
+    env_file: .env
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - edge
+      - app-name-internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app-name.rule=Host(`app-name.${PLATFORM_DOMAIN}`)"
+      - "traefik.http.routers.app-name.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.app-name.middlewares=secure-headers@file"
+      - "traefik.http.services.app-name.loadbalancer.server.port=3000"
+
+networks:
+  edge:
+    external: true
+  app-name-internal:
+    driver: bridge

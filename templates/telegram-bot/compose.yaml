@@ -1,0 +1,71 @@
+# Telegram bot template compose.yaml.
+#
+# This template assumes a long-polling bot with no inbound HTTP traffic, so
+# it is not attached to `edge` and carries no Traefik labels. If the bot
+# instead uses a webhook, attach the bot service to `edge` and add Traefik
+# labels following the pattern in templates/backend/compose.yaml.
+#
+# Replace app-name with the application's canonical kebab-case name
+# throughout this file, per docs/03-standards/STD-002-naming-convention.md.
+#
+# Reference: docs/03-standards/STD-001-compose-standard.md
+
+services:
+  bot:
+    image: ghcr.io/org/app-name:${IMAGE_TAG}
+    restart: unless-stopped
+    env_file: .env
+    healthcheck:
+      test: ["CMD", "node", "dist/healthcheck.js"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app-name-internal
+
+  cache:
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    volumes:
+      - app-name-cache-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app-name-internal
+
+volumes:
+  app-name-cache-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /srv/apps/app-name/volumes/cache-data
+
+networks:
+  app-name-internal:
+    driver: bridge

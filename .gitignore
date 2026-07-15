@@ -1,0 +1,20 @@
+# Secrets and runtime configuration — never committed, per
+# docs/03-standards/STD-005-environment-variables.md
+.env
+*.env
+!.env.example
+
+# Credential material referenced by infrastructure/traefik
+dashboard-users.htpasswd
+
+# Backup encryption key referenced by infrastructure/backup
+backup.key
+
+# Editor / OS metadata
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Local scratch state
+*.log
