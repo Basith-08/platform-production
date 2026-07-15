@@ -50,7 +50,8 @@ Rejected for the same reason it was rejected in [ADR-0001](ADR-0001-runtime-only
 
 # 5. Related Decisions
 
-- [ADR-0003 — GitHub Actions Deployment](ADR-0003-github-actions-deployment.md) — the mechanism by which Git state reaches production.
+- [ADR-0003 — GitHub Actions Deployment](ADR-0003-github-actions-deployment.md) — the mechanism by which Git state reaches production for applications.
+- [ADR-0011 — Automated Platform Service Deployment Pipeline](ADR-0011-platform-service-deployment-pipeline.md) — the equivalent mechanism for platform-service configuration under `infrastructure/`.
 
 ---
 

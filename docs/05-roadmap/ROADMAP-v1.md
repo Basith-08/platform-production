@@ -12,7 +12,7 @@
 
 # 1. Purpose
 
-This document defines the scope of platform version 1.0.0 — the current, shipped baseline described by every ARCH, ADR, STD, and OPS document in this repository.
+This document defines the scope of platform v1 (currently shipped as version `1.1.0`) — the current baseline described by every ARCH, ADR, STD, and OPS document in this repository. A minor version increment (e.g., `1.0.0` → `1.1.0`) that closes a gap within v1's own scope — such as automating platform-service deployment, per [ADR-0011](../02-decisions/ADR-0011-platform-service-deployment-pipeline.md) — does not itself constitute v2; see [ROADMAP v2](ROADMAP-v2.md) for what actually changes scope.
 
 ---
 
@@ -23,12 +23,13 @@ v1 delivers a single-server, Docker Compose–based production platform with:
 - Ubuntu 24.04 LTS host running Docker Engine, containerd, and the Compose plugin ([ARCH-006](../01-architecture/ARCH-006-runtime-architecture.md)).
 - Traefik as the sole public entrypoint and TLS terminator ([ARCH-004](../01-architecture/ARCH-004-network-architecture.md)).
 - Fully automated build → tag (commit SHA) → push (GHCR) → deploy (SSH) pipeline via GitHub Actions, per application repository ([ARCH-005](../01-architecture/ARCH-005-deployment-strategy.md)).
+- Fully automated, component-scoped platform-service deployment pipeline (Traefik, monitoring, backup, networks) via `platform-production`'s own GitHub Actions, with no build stage ([ADR-0011](../02-decisions/ADR-0011-platform-service-deployment-pipeline.md), [ARCH-005, Section 11](../01-architecture/ARCH-005-deployment-strategy.md#11-platform-service-deployment)).
 - Two-tier network isolation: shared `edge`, private per-application internal networks ([ARCH-004](../01-architecture/ARCH-004-network-architecture.md)).
 - Local `json-file` Docker logging with rotation, no centralized aggregation ([ADR-0008](../02-decisions/ADR-0008-logging-strategy.md)).
 - Beszel (resource metrics) and Uptime Kuma (availability) as the monitoring stack ([ARCH-009](../01-architecture/ARCH-009-monitoring-architecture.md)).
 - Scheduled, encrypted, offsite backups scoped to databases, object storage, and configuration ([ARCH-008](../01-architecture/ARCH-008-backup-architecture.md)).
 - Four onboarding templates: backend, frontend, telegram-bot, worker ([ARCH-003, Section 6](../01-architecture/ARCH-003-directory-structure.md#6-templates-structure-templates)).
-- Complete documentation set: 10 architecture documents, 10 ADRs, 10 standards, 10 operational runbooks.
+- Complete documentation set: 10 architecture documents, 11 ADRs, 11 standards, 11 operational runbooks.
 
 ---
 

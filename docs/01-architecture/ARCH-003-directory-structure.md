@@ -70,7 +70,7 @@ Every top-level directory has exactly one responsibility. No directory may conta
 | `docs/` | Architecture, decisions, standards, operations, roadmap | Runnable infrastructure code |
 | `infrastructure/` | Deployable Compose files and configuration for platform services | Application source code |
 | `templates/` | Reference scaffolding for new application repositories | Business logic, production secrets |
-| `.github/` | CI workflows for this repository (documentation/config validation only) | Application build or deploy workflows |
+| `.github/` | CI workflows for this repository: documentation/config validation, and deployment of `infrastructure/` platform services (never a build step — see [ADR-0011](../02-decisions/ADR-0011-platform-service-deployment-pipeline.md)) | Application build or deploy workflows |
 
 ---
 
@@ -93,7 +93,7 @@ Documents are numbered sequentially within their category and are never renumber
 
 | Directory | Contents |
 |---|---|
-| `automation/` | Deployment and provisioning scripts invoked by GitHub Actions or documented OPS procedures (e.g., server bootstrap script referenced by [OPS-001](../04-operations/OPS-001-server-provisioning.md)) |
+| `automation/` | Deployment and provisioning scripts invoked by GitHub Actions or documented OPS procedures (e.g., the server bootstrap script referenced by [OPS-001](../04-operations/OPS-001-server-provisioning.md), and the platform-service deploy/change-detection scripts referenced by [OPS-011](../04-operations/OPS-011-deploy-platform-service.md)) |
 | `backup/` | Backup job definitions and schedules, per [ARCH-008](ARCH-008-backup-architecture.md) |
 | `compose/` | Root/shared Compose fragments that tie platform services together (e.g., the shared `edge` network declaration consumed by `traefik/` and `monitoring/`) |
 | `monitoring/` | `compose.yaml` and configuration for Beszel and Uptime Kuma, per [ARCH-009](ARCH-009-monitoring-architecture.md) |

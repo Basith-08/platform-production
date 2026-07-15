@@ -57,6 +57,7 @@ Documentation is organized into six categories, per [ARCH-003 — Directory Stru
 | ADR-0008 | [Logging Strategy](02-decisions/ADR-0008-logging-strategy.md) |
 | ADR-0009 | [Monitoring Stack](02-decisions/ADR-0009-monitoring-stack.md) |
 | ADR-0010 | [Backup Strategy](02-decisions/ADR-0010-backup-strategy.md) |
+| ADR-0011 | [Platform Service Deployment Pipeline](02-decisions/ADR-0011-platform-service-deployment-pipeline.md) |
 
 ---
 
@@ -74,6 +75,7 @@ Documentation is organized into six categories, per [ARCH-003 — Directory Stru
 | STD-008 | [Volume Standard](03-standards/STD-008-volume-standard.md) |
 | STD-009 | [GitHub Actions Standard](03-standards/STD-009-github-actions-standard.md) |
 | STD-010 | [Security Standard](03-standards/STD-010-security-standard.md) |
+| STD-011 | [Platform Deployment Pipeline Standard](03-standards/STD-011-platform-deployment-pipeline-standard.md) |
 
 ---
 
@@ -91,6 +93,7 @@ Documentation is organized into six categories, per [ARCH-003 — Directory Stru
 | OPS-008 | [Incident Response](04-operations/OPS-008-incident-response.md) |
 | OPS-009 | [Disaster Recovery](04-operations/OPS-009-disaster-recovery.md) |
 | OPS-010 | [Maintenance](04-operations/OPS-010-maintenance.md) |
+| OPS-011 | [Deploy Platform Service](04-operations/OPS-011-deploy-platform-service.md) |
 
 ---
 

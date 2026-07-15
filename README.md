@@ -1,6 +1,6 @@
 # Platform Production
 
-**Version:** 1.0.0
+**Version:** 1.1.0
 
 **Status:** Active
 
@@ -51,15 +51,17 @@ flowchart TB
     Dev -->|"push"| AppRepo
     Dev -->|"push"| PlatformRepo
     AppRepo --> Actions
+    PlatformRepo --> Actions
     Actions -->|"build, tag: commit SHA, push"| GHCR
     Actions -->|"SSH: docker compose pull && up -d"| Prod
+    Actions -->|"SSH: rsync infrastructure/ + docker compose pull && up -d"| Prod
     GHCR -->|"pull only"| Prod
     Client -->|"443 / 80"| Traefik
     Traefik --> Apps
     Traefik --> Platform
 ```
 
-This is the platform's system context: developers push to Git, GitHub Actions builds and pushes immutable, commit-SHA-tagged images to GHCR, and the production server only ever pulls and runs — it never builds, never clones source, and is reachable only through Traefik. Full architecture: [ARCH-002 — Platform Architecture](docs/01-architecture/ARCH-002-platform-architecture.md).
+This is the platform's system context: developers push to Git, GitHub Actions builds and pushes immutable, commit-SHA-tagged application images to GHCR, and separately syncs and applies platform-service configuration directly from `platform-production` — the production server only ever pulls and runs, it never builds, never clones source, and is reachable only through Traefik. Full architecture: [ARCH-002 — Platform Architecture](docs/01-architecture/ARCH-002-platform-architecture.md). Full platform-service deployment rationale: [ADR-0011](docs/02-decisions/ADR-0011-platform-service-deployment-pipeline.md).
 
 ### Absolute Rules
 
@@ -69,7 +71,7 @@ This is the platform's system context: developers push to Git, GitHub Actions bu
 - Every application has its own repository; infrastructure and application code never mix.
 - Every image is tagged with its Git commit SHA — `latest` is never used.
 
-See [ARCH-001](docs/01-architecture/ARCH-001-platform-vision.md) and [ADR-0001](docs/02-decisions/ADR-0001-runtime-only.md) through [ADR-0005](docs/02-decisions/ADR-0005-git-commit-sha-tags.md) for the full reasoning behind each rule.
+See [ARCH-001](docs/01-architecture/ARCH-001-platform-vision.md), [ADR-0001](docs/02-decisions/ADR-0001-runtime-only.md) through [ADR-0005](docs/02-decisions/ADR-0005-git-commit-sha-tags.md), and [ADR-0011](docs/02-decisions/ADR-0011-platform-service-deployment-pipeline.md) for the full reasoning behind each rule.
 
 ---
 
@@ -96,7 +98,7 @@ platform-production/
 │   ├── frontend/
 │   ├── telegram-bot/
 │   └── worker/
-├── .github/workflows/     # This repository's own validation workflows
+├── .github/workflows/     # Validation, plus this repository's platform-service deploy pipeline
 ├── README.md
 ├── LICENSE
 ├── CHANGELOG.md
@@ -134,9 +136,16 @@ git clone https://github.com/<org>/platform-production.git
 cd platform-production
 sudo ./infrastructure/automation/bootstrap.sh <path-to-deploy-public-key>
 ./infrastructure/networks/create-networks.sh
-cd infrastructure/traefik && cp .env.example .env && docker compose up -d
-cd ../monitoring && cp .env.example .env && docker compose up -d
 ```
+
+On the server, populate each platform service's `.env` (never committed to Git):
+
+```
+cd /srv/platform/traefik && cp .env.example .env   # then edit it
+cd /srv/platform/monitoring && cp .env.example .env # then edit it
+```
+
+Add `PROD_HOST`, `PROD_DEPLOY_USER`, and `PROD_DEPLOY_KEY` as encrypted secrets on the `platform-production` repository, then push to `main` (or run the `Deploy Platform` workflow manually) to bring up Traefik and monitoring — see [ADR-0011](docs/02-decisions/ADR-0011-platform-service-deployment-pipeline.md) and [OPS-011 — Deploy Platform Service](docs/04-operations/OPS-011-deploy-platform-service.md). `docker compose up -d` run by hand on the server remains only as the documented emergency fallback.
 
 Then continue with the full procedure: [OPS-001 — Server Provisioning](docs/04-operations/OPS-001-server-provisioning.md).
 
@@ -145,7 +154,9 @@ Then continue with the full procedure: [OPS-001 — Server Provisioning](docs/04
 1. Copy the relevant directory from `templates/` (`backend/`, `frontend/`, `telegram-bot/`, or `worker/`) into a new application repository.
 2. Follow [OPS-002, Section 3.2 — Onboarding a New Application](docs/04-operations/OPS-002-deploy-application.md#32-onboarding-a-new-application-first-deployment).
 
-**Deploying a change:** merge to the application's deploy branch. GitHub Actions handles the rest — see [ARCH-005 — Deployment Strategy](docs/01-architecture/ARCH-005-deployment-strategy.md).
+**Deploying an application change:** merge to the application's deploy branch. GitHub Actions handles the rest — see [ARCH-005 — Deployment Strategy](docs/01-architecture/ARCH-005-deployment-strategy.md).
+
+**Deploying a platform-service change** (Traefik, monitoring, backup, networks): merge a change under `infrastructure/<component>/` to this repository's `main`. GitHub Actions deploys only the component(s) that changed — see [ARCH-005, Section 11](docs/01-architecture/ARCH-005-deployment-strategy.md#11-platform-service-deployment) and [OPS-011](docs/04-operations/OPS-011-deploy-platform-service.md).
 
 ---
 
@@ -156,9 +167,9 @@ The full documentation set lives in [`docs/`](docs/README.md), organized as:
 | Category | Contents |
 |---|---|
 | [01-architecture/](docs/01-architecture/) | What the platform is and why it is shaped this way (`ARCH-001`–`ARCH-010`) |
-| [02-decisions/](docs/02-decisions/) | Architecture Decision Records — the specific choices behind the architecture (`ADR-0001`–`ADR-0010`) |
-| [03-standards/](docs/03-standards/) | Enforceable, checkable engineering standards (`STD-001`–`STD-010`) |
-| [04-operations/](docs/04-operations/) | Step-by-step operational runbooks (`OPS-001`–`OPS-010`) |
+| [02-decisions/](docs/02-decisions/) | Architecture Decision Records — the specific choices behind the architecture (`ADR-0001`–`ADR-0011`) |
+| [03-standards/](docs/03-standards/) | Enforceable, checkable engineering standards (`STD-001`–`STD-011`) |
+| [04-operations/](docs/04-operations/) | Step-by-step operational runbooks (`OPS-001`–`OPS-011`) |
 | [05-roadmap/](docs/05-roadmap/) | Shipped scope, planned scope, and known gaps |
 
 Start with [ARCH-001 — Platform Vision](docs/01-architecture/ARCH-001-platform-vision.md) and [ARCH-002 — Platform Architecture](docs/01-architecture/ARCH-002-platform-architecture.md) for the complete picture.
@@ -171,13 +182,13 @@ Start with [ARCH-001 — Platform Vision](docs/01-architecture/ARCH-001-platform
 2. A change that introduces a new technology choice or reverses an existing one requires a new ADR in `docs/02-decisions/`, using [adr-template.md](docs/00-templates/adr-template.md), before implementation begins.
 3. A change to `infrastructure/` or `templates/` must comply with every applicable standard in `docs/03-standards/`; review against [STD-001](docs/03-standards/STD-001-compose-standard.md), [STD-007](docs/03-standards/STD-007-network-standard.md), and [STD-010](docs/03-standards/STD-010-security-standard.md) at minimum.
 4. New documents are created from the templates in [`docs/00-templates/`](docs/00-templates/), not written ad hoc, and follow the ID scheme in [STD-002, Section 3.8](docs/03-standards/STD-002-naming-convention.md#38-documentation-ids).
-5. This repository's own `.github/workflows/` validate documentation links and Compose file syntax on every pull request.
+5. This repository's own `.github/workflows/` validate documentation links and Compose file syntax on every pull request, and deploy `infrastructure/` platform-service changes to production on every push to `main` — see [STD-011](docs/03-standards/STD-011-platform-deployment-pipeline-standard.md).
 
 ---
 
 ## Roadmap
 
-- [ROADMAP v1](docs/05-roadmap/ROADMAP-v1.md) — current shipped scope (this version, `1.0.0`).
+- [ROADMAP v1](docs/05-roadmap/ROADMAP-v1.md) — current shipped scope (this version, `1.1.0`).
 - [ROADMAP v2](docs/05-roadmap/ROADMAP-v2.md) — planned next-scope candidates and their triggers (staging environment, multi-server scaling, HA Traefik, and more).
 - [Technical Debt](docs/05-roadmap/technical-debt.md) — tracked gaps between documentation and implementation.
 

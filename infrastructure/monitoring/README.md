@@ -4,11 +4,7 @@ Beszel (host/container resource metrics) and Uptime Kuma (HTTP(S) availability m
 
 ## Deploy
 
-Deployed once during [OPS-001 — Server Provisioning](../../docs/04-operations/OPS-001-server-provisioning.md), from `/srv/platform/monitoring`:
-
-```
-docker compose up -d
-```
+First brought up during [OPS-001 — Server Provisioning](../../docs/04-operations/OPS-001-server-provisioning.md), once `/srv/platform/monitoring/.env` has been populated from `.env.example`. Every change to this directory thereafter is deployed automatically by pushing to `main`: [`.github/workflows/deploy-platform.yml`](../../.github/workflows/deploy-platform.yml) detects the change and syncs, pulls, and applies it via [OPS-011 — Deploy Platform Service](../../docs/04-operations/OPS-011-deploy-platform-service.md).
 
 ## Registering Applications
 

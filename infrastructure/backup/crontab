@@ -5,4 +5,10 @@
 #            docs/04-operations/OPS-004-backup.md
 
 # Daily full backup run at 03:00 UTC (low-traffic window).
-0 3 * * * deploy /srv/platform-production/infrastructure/backup/run-backup.sh >> /var/log/platform-backup.log 2>&1
+#
+# Path note: run-backup.sh lives at /srv/platform/backup/, the synced
+# runtime copy of infrastructure/backup/ (see OPS-011 and ARCH-002,
+# Section 10 — Directory Mapping), not the working clone used at
+# provisioning time. This file itself is installed as the deploy user's
+# crontab by infrastructure/automation/deploy-component.sh.
+0 3 * * * /srv/platform/backup/run-backup.sh >> /var/log/platform-backup.log 2>&1

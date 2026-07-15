@@ -11,11 +11,7 @@ Traefik is the platform's sole reverse proxy and TLS termination point. It is th
 
 ## Deploy
 
-Deployed once during [OPS-001 — Server Provisioning](../../docs/04-operations/OPS-001-server-provisioning.md), from `/srv/platform/traefik`:
-
-```
-docker compose up -d
-```
+First brought up during [OPS-001 — Server Provisioning](../../docs/04-operations/OPS-001-server-provisioning.md), once `/srv/platform/traefik/.env` has been populated from `.env.example`. Every change to this directory thereafter — including the Traefik version pin in `compose.yaml` — is deployed automatically by pushing to `main`: [`.github/workflows/deploy-platform.yml`](../../.github/workflows/deploy-platform.yml) detects the change and syncs, pulls, and applies it via [OPS-011 — Deploy Platform Service](../../docs/04-operations/OPS-011-deploy-platform-service.md). Manual `docker compose pull && docker compose up -d` on the server is the documented emergency-only fallback (Section 3.3 of that document), not the routine path.
 
 Applications never modify this directory. An application makes itself routable by adding Traefik labels to its own `compose.yaml` and attaching to the `edge` network — see [STD-001, Rule 5](../../docs/03-standards/STD-001-compose-standard.md#3-rules).
 

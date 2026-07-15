@@ -178,6 +178,8 @@ GHCR is the sole source of deployable artifacts. Every image is built by GitHub 
 
 GitHub Actions is the only system authorized to build images and trigger deployments. Each application repository owns its own workflow, but every workflow conforms to the same contract: build → tag with commit SHA → push to GHCR → deploy via SSH (Section 7).
 
+`platform-production` owns a second, parallel pipeline (`.github/workflows/deploy-platform.yml`) that deploys platform-service configuration under `infrastructure/` to `/srv/platform` the same way — automatically, on push to `main` — but without a build stage, since platform-service images (Traefik, Beszel, Uptime Kuma) are version-pinned public images this repository never builds. See [ADR-0011](../02-decisions/ADR-0011-platform-service-deployment-pipeline.md) and [ARCH-005, Section 11](ARCH-005-deployment-strategy.md#11-platform-service-deployment).
+
 ## 4.5 Monitoring — Beszel
 
 Beszel provides host and container-level resource monitoring (CPU, memory, disk, network) across the production server. It is a platform service and is not exposed publicly except through Traefik-authenticated routing.
@@ -301,6 +303,8 @@ Key constraints on this flow:
 - **The production server never runs `docker build`.** Its only responsibilities are `docker compose pull` and `docker compose up -d`, executed over SSH by the workflow's deploy step.
 - **The deploy step authenticates using an SSH key**, not a password (Section 11).
 - **Each application repository owns its own workflow file**, but every workflow conforms to this same build → tag → push → deploy contract, per the Standardization principle (Section 2.6).
+
+This sequence governs **application** deployment. Platform-service deployment (Traefik, Beszel, Uptime Kuma, backup automation) follows a parallel but simpler sequence — no build or GHCR stage, since those images are pulled directly from public registries — owned by `platform-production`'s own workflows rather than an application repository. See [ARCH-005, Section 11 — Platform Service Deployment](ARCH-005-deployment-strategy.md#11-platform-service-deployment) and [ADR-0011](../02-decisions/ADR-0011-platform-service-deployment-pipeline.md).
 
 ---
 
@@ -462,7 +466,7 @@ The platform is designed so that a total loss of the production server is recove
 3. Clone `platform-production` and recreate `/srv/platform` and shared networks (Section 9, 10).
 4. Restore encrypted `.env` files and any platform-service configuration from backup into `/srv/platform` and `/srv/apps/<app-name>`.
 5. Restore persistent volumes (database dumps, object storage data) from the latest backup into `/srv/platform` and `/srv/apps/<app-name>/volumes`.
-6. Bring up platform services first (Traefik, monitoring, backup) via `docker compose up -d`.
+6. Bring up platform services first (Traefik, monitoring, backup) via `docker compose up -d`, or by re-running the `Deploy Platform` workflow (`workflow_dispatch`, all components) once the server's SSH host key and secrets are re-registered, per [OPS-011, Section 3.2](../04-operations/OPS-011-deploy-platform-service.md#32-manual-trigger-redeploy-without-a-new-change).
 7. For each application, recreate `/srv/apps/<app-name>` and run `docker compose pull && docker compose up -d` pinned to the last known-good commit SHA.
 8. Validate via Uptime Kuma and Beszel that all platform services and applications are healthy.
 

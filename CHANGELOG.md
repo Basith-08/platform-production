@@ -26,6 +26,29 @@ All notable changes to this repository are documented in this file. Format follo
 
 ---
 
+## [1.1.0] — 2026-07-15
+
+### Added
+
+- Automated, component-scoped Platform Deployment Pipeline (`.github/workflows/deploy-platform.yml`, reusable `.github/workflows/deploy-component.yml`) that deploys `infrastructure/traefik`, `infrastructure/monitoring`, `infrastructure/backup`, and `infrastructure/networks` to production on push to `main`, deploying only the components whose files changed, with no build stage and no application code involved ([ADR-0011](docs/02-decisions/ADR-0011-platform-service-deployment-pipeline.md), [STD-011](docs/03-standards/STD-011-platform-deployment-pipeline-standard.md), [OPS-011](docs/04-operations/OPS-011-deploy-platform-service.md)).
+- `infrastructure/automation/deploy-component.sh` — applies and health-verifies one platform-service component on the production server.
+- `infrastructure/automation/detect-changed-components.sh` — determines which platform-service components changed for a given push or manual dispatch.
+
+### Changed
+
+- `infrastructure/traefik/compose.yaml` pins `image: traefik:v3.7` (previously `v3.1`), resolving a Docker API incompatibility with Docker Engine 29.x.
+- `docs/01-architecture/ARCH-002-platform-architecture.md`, `docs/01-architecture/ARCH-005-deployment-strategy.md` (new Section 11 — Platform Service Deployment), and `docs/01-architecture/ARCH-003-directory-structure.md` updated to document the platform-service deployment pipeline alongside the existing application deployment pipeline.
+- `docs/02-decisions/ADR-0002-git-source-of-truth.md`, `docs/02-decisions/ADR-0003-github-actions-deployment.md`, and `docs/03-standards/STD-009-github-actions-standard.md` updated with cross-references clarifying their scope is application deployment specifically, distinct from [ADR-0011](docs/02-decisions/ADR-0011-platform-service-deployment-pipeline.md) / [STD-011](docs/03-standards/STD-011-platform-deployment-pipeline-standard.md).
+- `docs/04-operations/OPS-001-server-provisioning.md`, Step 9 (renumbered): platform services are now deployed via the pipeline instead of a manual `docker compose up -d`; Step 10 (renumbered) adds `platform-production` itself to the repositories that need `PROD_HOST`/`PROD_DEPLOY_USER`/`PROD_DEPLOY_KEY` secrets.
+- `infrastructure/traefik/README.md`, `infrastructure/monitoring/README.md`, `infrastructure/backup/README.md`, `infrastructure/networks/README.md`, and `infrastructure/automation/README.md` updated to describe pipeline-driven deployment instead of a one-time manual step.
+- `.github/README.md` corrected: this repository's workflows now do connect to the production server, narrowly, for platform-service deployment.
+
+### Fixed
+
+- `infrastructure/backup/crontab` referenced `run-backup.sh` at `/srv/platform-production/...`, a path that is never populated on production (per [ARCH-002, Section 10](docs/01-architecture/ARCH-002-platform-architecture.md#10-directory-mapping), only `/srv/platform` and `/srv/apps` hold runtime state); corrected to `/srv/platform/backup/run-backup.sh`, and removed an erroneous leading `deploy` user field that is only valid in a system-wide crontab, not a per-user one installed via `crontab <file>`.
+
+---
+
 ## [Unreleased]
 
 Nothing yet. See [ROADMAP v2](docs/05-roadmap/ROADMAP-v2.md) for planned next-scope candidates.

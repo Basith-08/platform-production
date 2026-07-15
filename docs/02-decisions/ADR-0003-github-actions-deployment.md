@@ -20,6 +20,8 @@ Given Git as the source of truth ([ADR-0002](ADR-0002-git-source-of-truth.md)), 
 
 GitHub Actions is the only system authorized to build application images and trigger production deployments. Each application repository owns a workflow, defined per [STD-009 — GitHub Actions Standard](../03-standards/STD-009-github-actions-standard.md), that builds the Docker image, pushes it to GHCR, and connects to the production server over SSH to run `docker compose pull` and `docker compose up -d`. No other CI/CD system (Jenkins, GitLab CI, CircleCI, manually-run scripts from a developer laptop) is used for production deployment.
 
+This decision covers **application** deployment specifically. Platform-service deployment (Traefik, monitoring, backup — `infrastructure/` in this repository) is likewise GitHub-Actions-only, but is a separate pipeline with no build stage, since those images are never built by this repository; see [ADR-0011 — Automated Platform Service Deployment Pipeline](ADR-0011-platform-service-deployment-pipeline.md).
+
 ---
 
 # 3. Alternatives Considered
@@ -57,6 +59,7 @@ Rejected: adds an always-running, internet-facing (or registry-polling) componen
 - [ADR-0002 — Git Source of Truth](ADR-0002-git-source-of-truth.md)
 - [ADR-0004 — GHCR](ADR-0004-ghcr.md)
 - [ADR-0005 — Git Commit SHA](ADR-0005-git-commit-sha-tags.md)
+- [ADR-0011 — Automated Platform Service Deployment Pipeline](ADR-0011-platform-service-deployment-pipeline.md) — the platform-service counterpart to this decision.
 
 ---
 

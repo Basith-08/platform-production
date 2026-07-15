@@ -18,7 +18,7 @@ This document defines how code moves from a developer's commit to a running cont
 
 # 2. Scope
 
-Covers deployment triggers, branching model, image tagging, deployment concurrency, and post-deploy health verification. Does not cover the mechanics of rollback (see [OPS-003 — Rollback](../04-operations/OPS-003-rollback.md)) or the CI workflow file syntax (see [STD-009 — GitHub Actions Standard](../03-standards/STD-009-github-actions-standard.md)).
+Covers deployment triggers, branching model, image tagging, deployment concurrency, and post-deploy health verification. Sections 3 through 10 cover **application** deployment specifically; Section 11 covers **platform service** deployment (Traefik, monitoring, backup, networks), which shares this document's principles but not its build/tag/GHCR mechanics. Does not cover the mechanics of rollback (see [OPS-003 — Rollback](../04-operations/OPS-003-rollback.md)) or the CI workflow file syntax (see [STD-009 — GitHub Actions Standard](../03-standards/STD-009-github-actions-standard.md) for applications, [STD-011 — Platform Deployment Pipeline Standard](../03-standards/STD-011-platform-deployment-pipeline-standard.md) for platform services).
 
 ---
 
@@ -103,11 +103,48 @@ Deployment is a single, automated, non-negotiable path: merge to the deploy bran
 
 ---
 
-# 11. References
+# 11. Platform Service Deployment
+
+Sections 3–10 describe how **applications** deploy. Platform services (Traefik, Beszel, Uptime Kuma, backup automation — `infrastructure/` in `platform-production`) deploy automatically too, per [ADR-0011 — Automated Platform Service Deployment Pipeline](../02-decisions/ADR-0011-platform-service-deployment-pipeline.md), but the sequence differs in one structural way: **there is no build or GHCR stage**, because platform-service images are version-pinned public images this repository never builds.
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant Repo as platform-production (main)
+    participant CI as GitHub Actions
+    participant Prod as Production Server
+
+    Dev->>Repo: git push (infrastructure/<component> changed)
+    Repo->>CI: deploy-platform.yml triggered
+    CI->>CI: Determine changed components
+    CI->>CI: Validate compose.yaml / crontab
+    CI->>Prod: SSH — rsync infrastructure/<component>/ to /srv/platform/<component>/
+    Prod->>Prod: docker compose pull (or install crontab / create-networks.sh)
+    Prod->>Prod: docker compose up -d
+    Prod->>Prod: Poll container health
+    Prod-->>CI: Deployment result
+    CI-->>Dev: Workflow result + deployment report
+```
+
+Key differences from application deployment (Sections 3–10), and what stays the same:
+
+- **Trigger:** push to `main` (not an application's own deploy branch) with changes under `infrastructure/**`, plus manual `workflow_dispatch`, per [STD-011, Rule 1](../03-standards/STD-011-platform-deployment-pipeline-standard.md#3-rules). Same triggering model as Section 4, scoped to this repository.
+- **No image tag, no GHCR:** the deployed artifact is configuration (`compose.yaml`, `traefik.yml`, dynamic middleware, `crontab`), synced with `rsync`, not an image pulled by SHA. The image reference inside `compose.yaml` (e.g., `traefik:v3.7`) is a pinned version tag, per [STD-001, Rule 4](../03-standards/STD-001-compose-standard.md#3-rules), and is itself part of what gets synced and reviewed in the pull request.
+- **Component-scoped concurrency, not whole-pipeline concurrency:** each `infrastructure/<component>` deploys independently, per [STD-011, Rule 5](../03-standards/STD-011-platform-deployment-pipeline-standard.md#3-rules) — unlike Section 7, which only needs to describe one application's own serialization, this pipeline must also guarantee unrelated components never block each other.
+- **Health verification and downtime expectations are unchanged:** Section 8 and Section 9 apply identically — a platform-service container is not considered deployed until it reports healthy, and a brief interruption during recreation is expected for the same single-replica reason.
+
+Full procedure: [OPS-011 — Deploy Platform Service](../04-operations/OPS-011-deploy-platform-service.md). Full pipeline rules: [STD-011 — Platform Deployment Pipeline Standard](../03-standards/STD-011-platform-deployment-pipeline-standard.md).
+
+---
+
+# 12. References
 
 - [ARCH-002 — Platform Architecture, Section 7](ARCH-002-platform-architecture.md#7-deployment-architecture)
 - [ADR-0003 — GitHub Actions Deployment](../02-decisions/ADR-0003-github-actions-deployment.md)
 - [ADR-0005 — Git Commit SHA](../02-decisions/ADR-0005-git-commit-sha-tags.md)
+- [ADR-0011 — Automated Platform Service Deployment Pipeline](../02-decisions/ADR-0011-platform-service-deployment-pipeline.md)
 - [STD-009 — GitHub Actions Standard](../03-standards/STD-009-github-actions-standard.md)
+- [STD-011 — Platform Deployment Pipeline Standard](../03-standards/STD-011-platform-deployment-pipeline-standard.md)
 - [OPS-002 — Deploy Application](../04-operations/OPS-002-deploy-application.md)
 - [OPS-003 — Rollback](../04-operations/OPS-003-rollback.md)
+- [OPS-011 — Deploy Platform Service](../04-operations/OPS-011-deploy-platform-service.md)

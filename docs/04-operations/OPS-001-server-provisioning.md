@@ -70,9 +70,10 @@ This procedure provisions a new production server from a bare Ubuntu 24.04 LTS i
    docker network create edge
    docker network create platform-internal
    ```
-9. **Deploy platform services** (Traefik, Beszel, Uptime Kuma, backup automation) from `infrastructure/`, per each service's own `compose.yaml`.
-10. **Point DNS** for every platform-service hostname (e.g., monitoring dashboards) at the server's public IP.
-11. **Add the deploy key as a GitHub Actions secret** (`PROD_HOST`, `PROD_DEPLOY_USER`, `PROD_DEPLOY_KEY`) in every application repository that will deploy to this server.
+9. **Populate each platform service's `.env`** from its `.env.example` (`infrastructure/traefik/.env.example`, `infrastructure/monitoring/.env.example`) directly on the server at `/srv/platform/<component>/.env`, mode `600` — this step cannot be automated, since a populated `.env` is never committed to Git, per [STD-005](../03-standards/STD-005-environment-variables.md).
+10. **Add the deploy key as a GitHub Actions secret** (`PROD_HOST`, `PROD_DEPLOY_USER`, `PROD_DEPLOY_KEY`) on the `platform-production` repository itself, and on every application repository that will deploy to this server.
+11. **Deploy platform services** (Traefik, Beszel, Uptime Kuma, backup automation) from `infrastructure/` by pushing to `platform-production`'s `main` branch (or running the `Deploy Platform` workflow manually with no `component` input, to deploy every component at once for this first run) — see [OPS-011 — Deploy Platform Service](OPS-011-deploy-platform-service.md). This replaces running `docker compose up -d` by hand; the manual command remains available only as the emergency path in [OPS-011, Section 3.4](OPS-011-deploy-platform-service.md#34-manual--emergency-path).
+12. **Point DNS** for every platform-service hostname (e.g., monitoring dashboards) at the server's public IP.
 
 ---
 
@@ -96,5 +97,7 @@ If provisioning fails partway through, re-running this procedure from the failed
 - [ARCH-002 — Platform Architecture, Section 10](../01-architecture/ARCH-002-platform-architecture.md#10-directory-mapping)
 - [ARCH-006 — Runtime Architecture](../01-architecture/ARCH-006-runtime-architecture.md)
 - [ARCH-007 — Security Architecture](../01-architecture/ARCH-007-security-architecture.md)
+- [STD-005 — Environment Variables](../03-standards/STD-005-environment-variables.md)
 - [STD-010 — Security Standard](../03-standards/STD-010-security-standard.md)
 - [OPS-009 — Disaster Recovery](OPS-009-disaster-recovery.md)
+- [OPS-011 — Deploy Platform Service](OPS-011-deploy-platform-service.md)

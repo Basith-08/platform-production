@@ -18,7 +18,7 @@ This standard defines the required structure and behavior of every application's
 
 # 2. Scope
 
-Applies to every `.github/workflows/deploy.yml` in every application repository.
+Applies to every `.github/workflows/deploy.yml` in every application repository. Does not apply to `platform-production`'s own `deploy-platform.yml` / `deploy-component.yml`, which deploy platform-service configuration rather than application images and are governed instead by [STD-011 — Platform Deployment Pipeline Standard](STD-011-platform-deployment-pipeline-standard.md).
 
 ---
 
