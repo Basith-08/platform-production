@@ -1,0 +1,57 @@
+name: Validate
+
+# This repository never builds or deploys applications — see
+# docs/02-decisions/ADR-0001-runtime-only.md. This workflow only validates
+# that documentation and infrastructure configuration in this repository
+# are internally consistent and syntactically correct.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  validate-compose:
+    name: Validate Compose files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compose files
+        run: |
+          set -e
+          for f in infrastructure/*/compose.yaml templates/*/compose.yaml; do
+            dir="$(dirname "${f}")"
+            # Compose requires env_file targets to exist; use each
+            # directory's own .env.example as a stand-in for validation
+            # only. A populated .env is never committed, per
+            # docs/03-standards/STD-005-environment-variables.md.
+            [ -f "${dir}/.env.example" ] && cp "${dir}/.env.example" "${dir}/.env"
+            echo "Validating ${f}"
+            docker compose -f "${f}" config -q
+            rm -f "${dir}/.env"
+          done
+
+  validate-markdown-links:
+    name: Validate documentation links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for broken relative markdown links
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: "yes"
+          check-modified-files-only: "no"
+          config-file: ".github/markdown-link-check-config.json"
+
+  validate-shell-scripts:
+    name: Lint shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: "./infrastructure"

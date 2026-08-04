@@ -1,0 +1,14 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+build.env
+node_modules
+dist
+__pycache__
+*.pyc
+vendor
+target
+coverage
+*.log

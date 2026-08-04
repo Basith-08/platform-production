@@ -1,0 +1,97 @@
+name: Deploy Platform Component
+
+# Reusable deployment workflow for a single infrastructure/<component>
+# directory (traefik, monitoring, backup, networks, or any future platform
+# service added under infrastructure/). Called by deploy-platform.yml once
+# per changed component — never triggered directly on its own.
+#
+# This workflow never builds an image and never touches application code:
+# it validates, syncs configuration, pulls already-published images, and
+# applies them, per ADR-0011 and STD-011.
+#
+# Reference: docs/02-decisions/ADR-0011-platform-service-deployment-pipeline.md
+#            docs/03-standards/STD-011-platform-deployment-pipeline-standard.md
+#            docs/04-operations/OPS-011-deploy-platform-service.md
+
+on:
+  workflow_call:
+    inputs:
+      component:
+        description: "Name of the infrastructure/<component> directory to deploy."
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-platform-${{ inputs.component }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.component }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate infrastructure/${{ inputs.component }}
+        run: |
+          set -e
+          dir="infrastructure/${{ inputs.component }}"
+          if [ ! -d "${dir}" ]; then
+            echo "No such directory: ${dir}" >&2
+            exit 1
+          fi
+          if [ -f "${dir}/compose.yaml" ]; then
+            [ -f "${dir}/.env.example" ] && cp "${dir}/.env.example" "${dir}/.env"
+            echo "Validating ${dir}/compose.yaml"
+            docker compose -f "${dir}/compose.yaml" config -q
+            rm -f "${dir}/.env"
+          fi
+          if [ -f "${dir}/crontab" ]; then
+            echo "Validating ${dir}/crontab syntax"
+            # A user crontab has five time fields and a command — no user
+            # column. Reject anything that looks like a system crontab
+            # line, since crontab(1) would otherwise install a malformed
+            # schedule silently.
+            awk '!/^#/ && NF { if ($6 !~ /^\//) { print "Unexpected crontab field layout: " $0; exit 1 } }' "${dir}/crontab"
+          fi
+
+      - name: Load production deploy key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.PROD_DEPLOY_KEY }}
+
+      - name: Trust production host key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -H "${{ secrets.PROD_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Sync deployment helper scripts
+        run: |
+          rsync -az --delete \
+            -e "ssh -o StrictHostKeyChecking=yes" \
+            infrastructure/automation/ \
+            "${{ secrets.PROD_DEPLOY_USER }}@${{ secrets.PROD_HOST }}:/srv/platform/automation/"
+          ssh -o StrictHostKeyChecking=yes \
+            "${{ secrets.PROD_DEPLOY_USER }}@${{ secrets.PROD_HOST }}" \
+            'chmod +x /srv/platform/automation/*.sh'
+
+      - name: Sync infrastructure/${{ inputs.component }}
+        run: |
+          rsync -az --delete \
+            -e "ssh -o StrictHostKeyChecking=yes" \
+            --exclude='.env' \
+            --exclude='certs/' \
+            --exclude='*-data/' \
+            --exclude='staging/' \
+            --exclude='backup.key' \
+            --exclude='dashboard-users.htpasswd' \
+            "infrastructure/${{ inputs.component }}/" \
+            "${{ secrets.PROD_DEPLOY_USER }}@${{ secrets.PROD_HOST }}:/srv/platform/${{ inputs.component }}/"
+
+      - name: Apply and verify
+        run: |
+          ssh -o StrictHostKeyChecking=yes \
+            "${{ secrets.PROD_DEPLOY_USER }}@${{ secrets.PROD_HOST }}" \
+            "/srv/platform/automation/deploy-component.sh ${{ inputs.component }}"

@@ -1,0 +1,107 @@
+name: Deploy Platform
+
+# Deploys platform-service infrastructure (infrastructure/traefik,
+# infrastructure/monitoring, infrastructure/backup, infrastructure/networks,
+# and any future infrastructure/<component> directory) to the production
+# server. Triggers on every push to main that touches infrastructure/, and
+# deploys only the components whose files actually changed — never a full
+# platform redeploy on an unrelated change.
+#
+# This workflow never builds an image, never deploys application code, and
+# never runs on a pull request. It is the platform-service counterpart to
+# each application repository's own deploy.yml (STD-009); the two are
+# deliberately separate pipelines because they deploy different things to
+# different directories on the server. See ADR-0011 for why this exists as
+# its own pipeline instead of extending STD-009.
+#
+# Reference: docs/02-decisions/ADR-0011-platform-service-deployment-pipeline.md
+#            docs/03-standards/STD-011-platform-deployment-pipeline-standard.md
+#            docs/04-operations/OPS-011-deploy-platform-service.md
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infrastructure/**"
+  workflow_dispatch:
+    inputs:
+      component:
+        description: "Deploy a single component only (e.g. traefik, monitoring, backup, networks). Leave blank to deploy every component that changed in the most recent push, or every component if no prior push context is available."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# No workflow-level concurrency group here, deliberately: components must
+# deploy independently (Requirement 4). Per-component serialization is
+# instead scoped inside deploy-component.yml (group: deploy-platform-
+# <component>), so a push touching only traefik never queues behind an
+# in-flight monitoring deployment, or vice versa.
+
+jobs:
+  plan:
+    name: Determine components to deploy
+    runs-on: ubuntu-latest
+    outputs:
+      components: ${{ steps.plan.outputs.components }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute changed components
+        id: plan
+        run: ./infrastructure/automation/detect-changed-components.sh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+          MANUAL_COMPONENT: ${{ github.event.inputs.component }}
+
+  deploy:
+    name: Deploy
+    needs: plan
+    if: needs.plan.outputs.components != '[]'
+    strategy:
+      matrix:
+        component: ${{ fromJson(needs.plan.outputs.components) }}
+      fail-fast: false
+    uses: ./.github/workflows/deploy-component.yml
+    with:
+      component: ${{ matrix.component }}
+    secrets: inherit
+
+  report:
+    name: Deployment report
+    needs: [plan, deploy]
+    if: always() && needs.plan.outputs.components != '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summarize
+        run: |
+          {
+            echo "## Platform Deployment Report"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Triggered by | \`${{ github.event_name }}\` |"
+            echo "| Components deployed | \`${{ needs.plan.outputs.components }}\` |"
+            echo "| Result | \`${{ needs.deploy.result }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail the run if any component deployment failed
+        if: needs.deploy.result != 'success'
+        run: |
+          echo "One or more component deployments did not succeed — see the deploy job matrix above." >&2
+          exit 1
+
+  no-op:
+    name: No platform components changed
+    needs: plan
+    if: needs.plan.outputs.components == '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No infrastructure/<component> directory changed in this push — nothing to deploy."
