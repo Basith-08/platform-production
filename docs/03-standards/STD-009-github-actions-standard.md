@@ -2,11 +2,11 @@
 
 **Status:** Approved
 
-**Version:** 1.0
+**Version:** 1.1
 
 **Owner:** Platform Team
 
-**Last Updated:** 2026-07-15
+**Last Updated:** 2026-08-20
 
 ---
 
@@ -29,9 +29,11 @@ Applies to every `.github/workflows/deploy.yml` in every application repository.
 3. The workflow **must** build the Docker image using `docker build`/`docker buildx`, tag it with `${{ github.sha }}` (full commit SHA), and push it to GHCR under the application's namespace, per [ADR-0005](../02-decisions/ADR-0005-git-commit-sha-tags.md). It **must not** additionally tag or push `latest`.
 4. The workflow **must** authenticate to GHCR using `GITHUB_TOKEN` or a scoped PAT stored as an encrypted secret — never a hardcoded credential.
 5. The deploy step **must** connect to the production server over SSH using a dedicated deploy key stored as an encrypted secret, per [ARCH-007, Section 4.1](../01-architecture/ARCH-007-security-architecture.md#4-security-boundaries).
-6. The deploy step **must** run exactly `docker compose pull` followed by `docker compose up -d` on the production server, scoped to that application's directory (`/srv/apps/<app-name>`). It **must not** run `docker build`, `git clone`, or any other build command on the production server, per [ADR-0001 — Runtime Only](../02-decisions/ADR-0001-runtime-only.md).
+6. The deploy step **must** synchronize the committed `compose.yaml` manifest to `/srv/apps/<app-name>/compose.yaml` without synchronizing source code, `.env`, secrets, or volumes; then it must run `docker compose config`, `docker compose pull`, and `docker compose up -d` in that directory. It **must not** run `docker build`, `git clone`, or any other build command on the production server, per [ADR-0001 — Runtime Only](../02-decisions/ADR-0001-runtime-only.md).
 7. Concurrency **must** be scoped by branch/ref (`concurrency: group: deploy-<app-name>, cancel-in-progress: false`) so overlapping deployments of the same application serialize rather than race, per [ARCH-005, Section 7](../01-architecture/ARCH-005-deployment-strategy.md#7-deployment-concurrency).
 8. No secret value **may** be echoed, printed, or written to a log step at any point in the workflow.
+9. The deploy step **must** use verified `PROD_KNOWN_HOSTS` with strict host-key checking and must fail if that secret is absent.
+10. After `up -d`, the workflow **must** perform a bounded health check that accepts `healthy` or `running` only when no healthcheck exists, and must print bounded diagnostics on failure.
 
 ---
 
@@ -73,16 +75,20 @@ jobs:
       - run: |
           docker build -t ghcr.io/org/invoice-api:${{ github.sha }} .
           docker push ghcr.io/org/invoice-api:${{ github.sha }}
-      - uses: appleboy/ssh-action@v1
+      - uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_DEPLOY_USER }}
-          key: ${{ secrets.PROD_DEPLOY_KEY }}
-          script: |
-            cd /srv/apps/invoice-api
-            sed -i "s|IMAGE_TAG=.*|IMAGE_TAG=${{ github.sha }}|" .env
-            docker compose pull
-            docker compose up -d
+          ssh-private-key: ${{ secrets.PROD_DEPLOY_KEY }}
+      - run: |
+          test -n "${PROD_KNOWN_HOSTS}"
+          printf '%s\n' "${PROD_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          rsync -az --checksum -e "ssh -o StrictHostKeyChecking=yes" compose.yaml \
+            "${{ secrets.PROD_DEPLOY_USER }}@${{ secrets.PROD_HOST }}:/srv/apps/invoice-api/.compose.yaml.tmp"
+          ssh -o StrictHostKeyChecking=yes "${{ secrets.PROD_DEPLOY_USER }}@${{ secrets.PROD_HOST }}" \
+            "mv /srv/apps/invoice-api/.compose.yaml.tmp /srv/apps/invoice-api/compose.yaml"
+          ssh -o StrictHostKeyChecking=yes "${{ secrets.PROD_DEPLOY_USER }}@${{ secrets.PROD_HOST }}" \
+            "cd /srv/apps/invoice-api && sed -i 's|^IMAGE_TAG=.*|IMAGE_TAG=${{ github.sha }}|' .env && docker compose config -q && docker compose pull && docker compose up -d"
+        env:
+          PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
 ```
 
 ## 4.2 Non-Compliant

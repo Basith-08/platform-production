@@ -7,9 +7,13 @@ Run `./vps-status.sh` on the VPS for a lightweight snapshot of host, disk, Docke
 containers, health, and container memory. The web dashboards are opt-in through
 Compose profiles.
 
+`prepare.sh` creates `beszel-data/` and `kuma-data/` idempotently. Deployment
+never deletes these persistent directories. The server-side `.env` remains
+required even when all profiles are disabled.
+
 ## Deploy
 
-First brought up during [OPS-001 — Server Provisioning](../../docs/04-operations/OPS-001-server-provisioning.md), once `/srv/platform/monitoring/.env` has been populated from `.env.example`. Every change to this directory thereafter is deployed automatically by pushing to `main`: [`.github/workflows/deploy-platform.yml`](../../.github/workflows/deploy-platform.yml) detects the change and syncs, pulls, and applies it via [OPS-011 — Deploy Platform Service](../../docs/04-operations/OPS-011-deploy-platform-service.md).
+First brought up during [OPS-001 — Server Provisioning](../../docs/04-operations/OPS-001-server-provisioning.md), once `/srv/platform/monitoring/.env` has been populated from `.env.example`. Every change to this directory thereafter is staged, prepared, and deployed automatically by pushing to `main`: [`.github/workflows/deploy-platform.yml`](../../.github/workflows/deploy-platform.yml) detects the change and applies it via [OPS-011 — Deploy Platform Service](../../docs/04-operations/OPS-011-deploy-platform-service.md). A missing `.env` fails clearly rather than producing a cryptic Compose error.
 
 The default deployment leaves all monitoring services stopped. To run only Beszel
 Hub and its agent, set `COMPOSE_PROFILES=beszel,agent`. Uptime Kuma is independent

@@ -1,70 +1,96 @@
 # OPS-004 — Backup
 
 **Status:** Approved
+**Version:** 2.0
+**Last Updated:** 2026-08-18
 
-**Version:** 1.0
+## 1. Purpose
 
-**Owner:** Platform Team
+Run and verify encrypted production backups to Google Drive through rclone.
 
-**Last Updated:** 2026-07-15
+## 2. One-time Google Drive setup
 
----
+On the production server as `deploy`:
 
-# 1. Purpose
+1. Install/provision rclone (bootstrap installs it, or install it using the
+   official rclone method on an already-running server).
+2. Authenticate headlessly and create a remote named exactly as
+   `RCLONE_REMOTE`:
 
-This procedure executes and verifies a backup run, implementing [ARCH-008 — Backup Architecture](../01-architecture/ARCH-008-backup-architecture.md).
+   ```bash
+   rclone config
+   rclone listremotes
+   rclone lsd gdrive-backup:
+   ```
 
----
+   For a headless OAuth setup, start `rclone config` on the server and follow
+   its browser URL flow, or use `rclone authorize` on a trusted workstation and
+   paste the authorization result when prompted. Never commit or paste the
+   token into this repository.
+3. Put the config at `/home/deploy/.config/rclone/rclone.conf`, owned by
+   `deploy`, mode `600`.
+4. Copy `infrastructure/backup/backup.env.example` to
+   `/srv/platform/backup/backup.env`, set the remote/base/config paths, and
+   chmod it `600`. Do not put a token or password in it.
+5. Provision `/srv/platform/backup/backup.key` out-of-band, owned by `deploy`,
+   mode `600`, and store a separate offline recovery copy.
+6. Run the read-only preflight:
 
-# 2. Preconditions
+   ```bash
+   /srv/platform/backup/backup-doctor.sh
+   ```
 
-- Backup jobs are defined and scheduled under `infrastructure/backup/`, per [ARCH-003, Section 5](../01-architecture/ARCH-003-directory-structure.md#5-infrastructure-structure-infrastructure).
-- Offsite backup destination credentials are provisioned and accessible to the backup job (not to application containers).
-- Every application requiring backup has its volumes registered per [STD-008, Rule 4](../03-standards/STD-008-volume-standard.md#3-rules).
+7. Run a manual backup and confirm the object exists in Drive before relying
+   on cron.
 
----
+The Google Drive root is not deleted or synchronized by this design.
 
-# 3. Procedure
+## 3. Scheduled and manual execution
 
-## 3.1 Scheduled (Automatic) Backup
+Cron runs at 03:00 UTC. Sunday adds the same archive to `weekly`; day 1 adds it
+to `monthly`. Retention then keeps newest 14/8/6 per application and tier.
 
-Scheduled backups run automatically via cron, orchestrated by `infrastructure/automation/`, and require no manual action under normal operation. This section documents what happens for verification purposes:
+```bash
+/srv/platform/backup/run-backup.sh
+/srv/platform/backup/run-backup.sh invoice-api
+```
 
-1. The backup job dumps each registered PostgreSQL database (`pg_dump`) into the local staging area (`/srv/platform/backup/staging`).
-2. The backup job syncs each registered object storage (MinIO) volume into staging.
-3. The backup job archives `.env` files and Traefik dynamic configuration into staging.
-4. The backup job encrypts the staged archive.
-5. The backup job transfers the encrypted archive to the offsite destination.
-6. The backup job prunes offsite backups older than the retention window, per [ARCH-008, Section 5](../01-architecture/ARCH-008-backup-architecture.md#5-schedule-and-retention).
-7. The backup job clears local staging after a confirmed successful offsite transfer.
+Each valid application must have a lowercase kebab-case directory containing
+`compose.yaml` and `.env`. Other `/srv/apps/*` directories are warned and
+skipped. A valid application's database service is detected from Compose; if
+`db` exists, it must be running and its `POSTGRES_USER`/`POSTGRES_DB` are read
+inside the container. A failed or zero-byte dump fails that application backup.
 
-## 3.2 Manual On-Demand Backup
+The database dump is plain SQL (`db.sql`) and non-database persistent volume
+data is copied while excluding `/volumes/db-data/`. Platform state is archived
+under the `platform` pseudo-application only when the documented paths exist.
 
-Used before a risky operation (e.g., a schema migration, a major version upgrade):
+## 4. Verification
 
-1. SSH to the production server as the deploy user.
-2. Run the backup job script directly: `infrastructure/backup/run-backup.sh <app-name>` (or the platform-wide variant with no argument to back up everything).
-3. Confirm the job completes successfully (exit code `0` and a new archive present at the offsite destination).
+```bash
+rclone --config /home/deploy/.config/rclone/rclone.conf listremotes
+rclone --config /home/deploy/.config/rclone/rclone.conf lsd gdrive-backup:
+rclone --config /home/deploy/.config/rclone/rclone.conf lsf \
+  gdrive-backup:platform-production/daily/invoice-api
+```
 
----
+A successful script exit means every required `copyto` completed. A failed
+upload is non-zero and leaves the encrypted local archive for retry; it is not
+reported as success. Plaintext staging is cleaned through a restrictive exit
+trap. The next monthly maintenance window must perform a restore test, not
+just list the remote object.
 
-# 4. Verification
+## 5. Failure handling
 
-- The offsite destination shows a new archive with today's timestamp.
-- The backup job's log (viewable via `docker compose logs` for the backup service, or the script's own log output) shows no errors.
-- Uptime Kuma or an equivalent scheduled-job check (per [ARCH-009 — Monitoring Architecture](../01-architecture/ARCH-009-monitoring-architecture.md)) reflects a successful last-run timestamp.
+If the doctor fails, do not start the backup. If a run exits non-zero, inspect
+`/var/log/platform/backup.log` and the encrypted archive in staging, correct
+the dependency/network/disk issue, and retry. The `flock` lock prevents a
+second run; an overlapping invocation exits `75` and leaves no stale lock
+process.
 
----
-
-# 5. Rollback / Failure Handling
-
-If a scheduled backup fails, local staging is retained (Step 7 does not run), so the next scheduled attempt has a chance to succeed without losing the prior successful backup at the offsite destination. If backups fail for more than one consecutive scheduled run, treat it as an incident per [OPS-008 — Incident Response](OPS-008-incident-response.md) — do not let RPO silently degrade.
-
----
-
-# 6. References
+## 6. References
 
 - [ARCH-008 — Backup Architecture](../01-architecture/ARCH-008-backup-architecture.md)
 - [ADR-0010 — Backup Strategy](../02-decisions/ADR-0010-backup-strategy.md)
-- [STD-008 — Volume Standard](../03-standards/STD-008-volume-standard.md)
 - [OPS-005 — Restore](OPS-005-restore.md)
+- [OPS-012 — Migrate VPS Provider](OPS-012-migrate-vps-provider.md)

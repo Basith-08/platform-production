@@ -1,7 +1,7 @@
 name: Deploy Platform Component
 
 # Reusable deployment workflow for a single infrastructure/<component>
-# directory (traefik, monitoring, backup, networks, or any future platform
+# directory (traefik, monitoring, backup, maintenance, networks, or any future platform
 # service added under infrastructure/). Called by deploy-platform.yml once
 # per changed component — never triggered directly on its own.
 #
@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Validate infrastructure/${{ inputs.component }}
         run: |
@@ -62,10 +62,18 @@ jobs:
           ssh-private-key: ${{ secrets.PROD_DEPLOY_KEY }}
 
       - name: Trust production host key
+        env:
+          PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
         run: |
+          set -euo pipefail
+          [ -n "${PROD_KNOWN_HOSTS}" ] || {
+            echo "PROD_KNOWN_HOSTS is required; refusing to trust a key learned during deployment." >&2
+            exit 1
+          }
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          ssh-keyscan -H "${{ secrets.PROD_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          printf '%s\n' "${PROD_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
 
       - name: Sync deployment helper scripts
         run: |
@@ -78,20 +86,39 @@ jobs:
             'chmod +x /srv/platform/automation/*.sh'
 
       - name: Sync infrastructure/${{ inputs.component }}
+        env:
+          COMPONENT: ${{ inputs.component }}
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_DEPLOY_USER: ${{ secrets.PROD_DEPLOY_USER }}
         run: |
+          set -euo pipefail
+          case "${COMPONENT}" in
+            traefik|monitoring|backup|maintenance|networks) ;;
+            *) echo "Unsupported component: ${COMPONENT}" >&2; exit 1 ;;
+          esac
+          remote_stage="/srv/platform/.staging/${COMPONENT}"
+          ssh -o StrictHostKeyChecking=yes \
+            "${PROD_DEPLOY_USER}@${PROD_HOST}" \
+            "mkdir -p -m 0750 '${remote_stage}'"
           rsync -az --delete \
             -e "ssh -o StrictHostKeyChecking=yes" \
-            --exclude='.env' \
+            --exclude='*.env' \
             --exclude='certs/' \
             --exclude='*-data/' \
             --exclude='staging/' \
             --exclude='backup.key' \
+            --exclude='rclone.conf' \
             --exclude='dashboard-users.htpasswd' \
-            "infrastructure/${{ inputs.component }}/" \
-            "${{ secrets.PROD_DEPLOY_USER }}@${{ secrets.PROD_HOST }}:/srv/platform/${{ inputs.component }}/"
+            "infrastructure/${COMPONENT}/" \
+            "${PROD_DEPLOY_USER}@${PROD_HOST}:${remote_stage}/"
 
       - name: Apply and verify
+        env:
+          COMPONENT: ${{ inputs.component }}
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_DEPLOY_USER: ${{ secrets.PROD_DEPLOY_USER }}
         run: |
+          set -euo pipefail
           ssh -o StrictHostKeyChecking=yes \
-            "${{ secrets.PROD_DEPLOY_USER }}@${{ secrets.PROD_HOST }}" \
-            "/srv/platform/automation/deploy-component.sh ${{ inputs.component }}"
+            "${PROD_DEPLOY_USER}@${PROD_HOST}" \
+            "/srv/platform/automation/deploy-component.sh '${COMPONENT}' --staged-dir '/srv/platform/.staging/${COMPONENT}'"

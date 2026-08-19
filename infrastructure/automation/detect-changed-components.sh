@@ -11,9 +11,10 @@
 #      component only.
 #   2. workflow_dispatch with no component input -> every known component
 #      (a manual full resync).
-#   3. push with no usable "before" SHA (first push seen, or a force-push
-#      GitHub reports as all-zeros) -> every known component, since a
-#      correct diff base can't be established.
+#   3. push with no usable "before" SHA (first push, a force-push GitHub
+#      reports as all-zeros, or an amended commit that is no longer present
+#      in the checkout) -> every known component, since a correct diff base
+#      can't be established.
 #   4. push with a usable diff range -> every component whose directory
 #      changed. A change under infrastructure/compose/ (fragments shared
 #      by more than one component's compose.yaml) is treated as a change
@@ -23,6 +24,11 @@
 # component — it holds this script and deploy-component.sh, which are
 # re-synced to /srv/platform/automation/ on every component deploy
 # regardless of whether automation/ changed.
+#
+# Outputs:
+#   components          -> complete selected component list
+#   non_network         -> selected list with networks removed
+#   networks_selected   -> true/false dependency gate for the workflow
 #
 # Reference: docs/01-architecture/ARCH-005-deployment-strategy.md
 #            docs/03-standards/STD-011-platform-deployment-pipeline-standard.md
@@ -67,6 +73,10 @@ elif [ -z "${BEFORE_SHA:-}" ] || [ "${BEFORE_SHA}" = "00000000000000000000000000
   selected="$(select_all)"
   echo "No usable prior commit for a diff (first push or force-push): deploying every component." >&2
 
+elif ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+  selected="$(select_all)"
+  echo "Prior commit ${BEFORE_SHA} is unavailable in this checkout (amended commit or force-push): deploying every component." >&2
+
 else
   changed_paths="$(git diff --name-only "${BEFORE_SHA}" "${AFTER_SHA}" -- "${INFRA_DIR}")"
   if grep -q "^${INFRA_DIR}/compose/" <<< "${changed_paths}"; then
@@ -79,6 +89,24 @@ else
   fi
 fi
 
-json="$(grep -v '^$' <<< "${selected}" | jq -R . | jq -sc .)"
-echo "components=${json}" >> "${GITHUB_OUTPUT:?GITHUB_OUTPUT is not set}"
-echo "Selected components: ${json}" >&2
+json_array() {
+  local values="$1"
+  if [ -z "${values}" ]; then
+    printf '[]\n'
+  else
+    grep -v '^$' <<< "${values}" | jq -R . | jq -sc .
+  fi
+}
+
+json="$(json_array "${selected}")"
+non_network_selected="$(grep -v '^networks$' <<< "${selected}" || true)"
+non_network_json="$(json_array "${non_network_selected}")"
+networks_selected=false
+grep -qx networks <<< "${selected}" && networks_selected=true
+output_file="${GITHUB_OUTPUT:?GITHUB_OUTPUT is not set}"
+{
+  echo "components=${json}"
+  echo "non_network=${non_network_json}"
+  echo "networks_selected=${networks_selected}"
+} >> "${output_file}"
+echo "Selected components: ${json}; networks gate: ${networks_selected}" >&2

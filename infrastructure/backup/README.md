@@ -1,22 +1,58 @@
-# infrastructure/backup/
+# Production backup component
 
-Backup job scripts implementing [ARCH-008 — Backup Architecture](../../docs/01-architecture/ARCH-008-backup-architecture.md) and [ADR-0010 — Backup Strategy](../../docs/02-decisions/ADR-0010-backup-strategy.md).
+This component creates GPG-symmetric encrypted archives and uploads them to
+Google Drive through `rclone`. It is deployed to `/srv/platform/backup/` and
+runs as the `deploy` user's cron job.
 
-## Layout
+## Runtime files
 
-- `run-backup.sh` — dumps registered databases, syncs volumes, archives configuration, encrypts, and transfers offsite for one or every application.
-- `transfer-offsite.sh` — the single place the offsite destination and its transfer command are configured.
-- `prune-backups.sh` — enforces the retention policy (14 daily / 8 weekly / 6 monthly) at the offsite destination.
-- `crontab` — the schedule installed on the production server during [OPS-001 — Server Provisioning](../../docs/04-operations/OPS-001-server-provisioning.md).
+Provision these files out-of-band; none is committed:
 
-## Deploy
+- `/srv/platform/backup/backup.env`, copied from `backup.env.example`.
+- `/srv/platform/backup/backup.key`, the GPG passphrase file, mode `600`.
+- `/home/deploy/.config/rclone/rclone.conf`, mode `600`.
 
-`crontab` and the `.sh` scripts above are synced to `/srv/platform/backup/` and the `crontab` file is (re-)installed for the deploy user automatically whenever this directory changes on `main` — see [`.github/workflows/deploy-platform.yml`](../../.github/workflows/deploy-platform.yml) and [OPS-011 — Deploy Platform Service](../../docs/04-operations/OPS-011-deploy-platform-service.md). There is no long-running container to health-check for this component; a successful sync plus `crontab -l` on the server is the verification.
+`backup.key` and the rclone credential must have separate secure recovery
+copies. The encrypted archive deliberately does not contain either one.
 
-## Operating
+## Remote layout
 
-Routine execution is automatic via the installed `crontab`. Manual/on-demand execution and verification procedures are documented in [OPS-004 — Backup](../../docs/04-operations/OPS-004-backup.md). Restore procedures are documented in [OPS-005 — Restore](../../docs/04-operations/OPS-005-restore.md).
+The configured `RCLONE_BASE_PATH` is used below; the default is
+`platform-production`:
 
-## Encryption Key
+```text
+<remote>:platform-production/daily/<app-name>/<app-name>-<UTC timestamp>.tar.gz.gpg
+<remote>:platform-production/weekly/<app-name>/<same archive>.tar.gz.gpg
+<remote>:platform-production/monthly/<app-name>/<same archive>.tar.gz.gpg
+```
 
-`run-backup.sh` reads a symmetric encryption passphrase from `/srv/platform/backup/backup.key`, which is provisioned out-of-band during server setup and is never committed to this repository, per [STD-005 — Environment Variables](../../docs/03-standards/STD-005-environment-variables.md).
+Every successful run uploads `daily`. Sunday runs also upload `weekly`, and
+the first day of a month also uploads `monthly`. Retention keeps the newest
+14/8/6 objects per application and tier, using exact-object `rclone deletefile`.
+
+The pseudo-application `platform` contains only existing, non-regenerable
+platform state: Traefik/monitoring `.env` files and Beszel/Uptime Kuma data.
+Traefik ACME certificates, Docker images/cache, containers, writable layers,
+`backup.key`, `backup.env`, and `rclone.conf` are excluded.
+
+## Commands
+
+```bash
+/srv/platform/backup/backup-doctor.sh
+/srv/platform/backup/run-backup.sh                 # all valid applications + platform state
+/srv/platform/backup/run-backup.sh invoice-api     # one application
+rclone --config /home/deploy/.config/rclone/rclone.conf listremotes
+rclone --config /home/deploy/.config/rclone/rclone.conf lsd gdrive-backup:
+rclone --config /home/deploy/.config/rclone/rclone.conf lsf \
+  gdrive-backup:platform-production/daily/invoice-api
+```
+
+The doctor is read-only and must return `0` before the first manual run.
+Backups are serialized with `flock`; a concurrent invocation exits `75`.
+Local encrypted archives are removed only after every required remote upload
+succeeds. A failed upload leaves the encrypted archive in staging for retry or
+diagnosis; plaintext staging is removed by the exit trap.
+
+See [OPS-004 — Backup](../../docs/04-operations/OPS-004-backup.md),
+[OPS-005 — Restore](../../docs/04-operations/OPS-005-restore.md), and
+[OPS-012 — Migrate VPS Provider](../../docs/04-operations/OPS-012-migrate-vps-provider.md).

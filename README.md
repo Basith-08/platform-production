@@ -1,6 +1,6 @@
 # Platform Production
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 
 **Status:** Active
 
@@ -53,8 +53,8 @@ flowchart TB
     AppRepo --> Actions
     PlatformRepo --> Actions
     Actions -->|"build, tag: commit SHA, push"| GHCR
-    Actions -->|"SSH: docker compose pull && up -d"| Prod
-    Actions -->|"SSH: rsync infrastructure/ + docker compose pull && up -d"| Prod
+    Actions -->|"SSH: manifest sync + compose pull/up + health"| Prod
+    Actions -->|"SSH: staged infrastructure sync + compose apply"| Prod
     GHCR -->|"pull only"| Prod
     Client -->|"443 / 80"| Traefik
     Traefik --> Apps
@@ -131,21 +131,32 @@ Explicitly **not** part of the stack: Kubernetes, Docker Swarm, Portainer. See [
 
 **Provisioning a new production server:**
 
-```
-git clone https://github.com/<org>/platform-production.git
-cd platform-production
-sudo ./infrastructure/automation/bootstrap.sh <path-to-deploy-public-key>
-./infrastructure/networks/create-networks.sh
+```text
+trusted workstation/provider console
+        ↓ transfer bootstrap.sh, install-rclone.sh, platform-doctor.sh, keys
+fresh VPS: bootstrap.sh provision --hostname ... --admin-key ... --deploy-key ...
+        ↓ platform-doctor host; verify new admin/deploy SSH sessions
+fresh VPS: bootstrap.sh harden
+        ↓ configure PROD_* secrets and runtime files
+GitHub Actions: Deploy Platform (networks first, dependents after)
 ```
 
-On the server, populate each platform service's `.env` (never committed to Git):
+The server never needs a permanent clone of `platform-production`; GitHub
+Actions synchronizes platform configuration into `/srv/platform`. Populate
+runtime files on the server out of band (never committed to Git):
 
 ```
 cd /srv/platform/traefik && cp .env.example .env   # then edit it
 cd /srv/platform/monitoring && cp .env.example .env # then edit it
 ```
 
-Add `PROD_HOST`, `PROD_DEPLOY_USER`, and `PROD_DEPLOY_KEY` as encrypted secrets on the `platform-production` repository, then push to `main` (or run the `Deploy Platform` workflow manually) to bring up Traefik and monitoring — see [ADR-0011](docs/02-decisions/ADR-0011-platform-service-deployment-pipeline.md) and [OPS-011 — Deploy Platform Service](docs/04-operations/OPS-011-deploy-platform-service.md). `docker compose up -d` run by hand on the server remains only as the documented emergency fallback.
+Add `PROD_HOST`, `PROD_DEPLOY_USER`, `PROD_DEPLOY_KEY`, and verified
+`PROD_KNOWN_HOSTS` as encrypted secrets on the `platform-production` repository,
+then push to `main` (or run the `Deploy Platform` workflow manually) to bring
+up platform components — see [ADR-0011](docs/02-decisions/ADR-0011-platform-service-deployment-pipeline.md)
+and [OPS-011 — Deploy Platform Service](docs/04-operations/OPS-011-deploy-platform-service.md).
+`docker compose up -d` run by hand on the server remains only the documented
+emergency fallback.
 
 Then continue with the full procedure: [OPS-001 — Server Provisioning](docs/04-operations/OPS-001-server-provisioning.md).
 
@@ -188,7 +199,7 @@ Start with [ARCH-001 — Platform Vision](docs/01-architecture/ARCH-001-platform
 
 ## Roadmap
 
-- [ROADMAP v1](docs/05-roadmap/ROADMAP-v1.md) — current shipped scope (this version, `1.1.0`).
+- [ROADMAP v1](docs/05-roadmap/ROADMAP-v1.md) — current shipped scope (this version, `1.2.0`).
 - [ROADMAP v2](docs/05-roadmap/ROADMAP-v2.md) — planned next-scope candidates and their triggers (staging environment, multi-server scaling, HA Traefik, and more).
 - [Technical Debt](docs/05-roadmap/technical-debt.md) — tracked gaps between documentation and implementation.
 

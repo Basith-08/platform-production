@@ -1,104 +1,84 @@
 # ARCH-008 — Backup Architecture
 
 **Status:** Approved
-
-**Version:** 1.0
-
+**Version:** 2.0
 **Owner:** Platform Team
+**Last Updated:** 2026-08-18
 
-**Last Updated:** 2026-07-15
+## 1. Purpose and boundary
 
----
+Production compute is disposable. Git is the infrastructure/configuration
+source of truth, GHCR is the durable source for immutable application images,
+and Google Drive is the offsite store for encrypted persistent runtime state.
+Provider snapshots are not part of the recovery design.
 
-# 1. Purpose
+## 2. Scope
 
-This document defines what the platform backs up, how often, where backups are stored, and how backup integrity is verified. It expands the backup scope table introduced in [ARCH-002, Section 13](ARCH-002-platform-architecture.md#13-disaster-recovery-concept) into a complete architecture, and is the basis for [ADR-0010 — Backup Strategy](../02-decisions/ADR-0010-backup-strategy.md).
+| Scope | Included | Method |
+|---|---|---|
+| Application database | PostgreSQL service `db` | Logical `pg_dump` executed inside the running container |
+| Application persistent data | Non-database directories under `/srv/apps/<app>/volumes` | `rsync`; root `db-data/` is excluded |
+| Application config | `/srv/apps/<app>/.env` | Encrypted archive |
+| Platform state | Existing `/srv/platform/traefik/.env`, `/srv/platform/monitoring/.env`, `beszel-data`, `kuma-data` | Encrypted `platform` archive |
+| Regenerable state | Source, Docker images/cache, containers, writable layers, Traefik ACME certs | Not backed up |
+| Backup credentials | `backup.key`, `backup.env`, rclone config/OAuth credentials | Never included in archive; provision separately |
 
----
+The database physical directory is never copied while PostgreSQL is running.
+The logical SQL dump is the only PostgreSQL backup representation. Volume
+directories such as uploads/object storage remain included.
 
-# 2. Scope
+## 3. Flow and destination
 
-Covers backup scope, schedule, retention, storage destination, and encryption. Restore procedure is documented operationally in [OPS-005 — Restore](../04-operations/OPS-005-restore.md); backup execution procedure is documented in [OPS-004 — Backup](../04-operations/OPS-004-backup.md).
-
----
-
-# 3. Backup Scope
-
-| Data Class | Example | Backed Up | Method |
-|---|---|---|---|
-| Application databases | PostgreSQL volumes | Yes | Scheduled logical dump (`pg_dump`) per database |
-| Object storage | MinIO data | Yes | Scheduled sync to backup destination |
-| Cache | Redis | Only if configured for persistence (AOF/RDB); otherwise treated as rebuildable | Scheduled snapshot sync, when applicable |
-| Configuration | `.env` files, Traefik dynamic config | Yes | Scheduled encrypted archive |
-| Application source code | N/A | Not applicable | Lives in Git, not on the server |
-| Container images | GHCR-hosted images | Not backed up separately | GHCR is the durable store; see [ADR-0004](../02-decisions/ADR-0004-ghcr.md) |
-
-Backup scope follows a single rule: **anything that cannot be regenerated from Git, GHCR, or DNS is backed up; anything that can be is not.**
-
----
-
-# 4. Backup Flow
-
-```mermaid
-flowchart LR
-    subgraph Prod["Production Server"]
-        DB["PostgreSQL Volumes"]
-        Obj["MinIO Volumes"]
-        Cfg[".env / Traefik Config"]
-        Job["Backup Job\n(infrastructure/backup/)"]
-    end
-
-    Staging["Local Staging Area\n/srv/platform/backup"]
-    Offsite["Offsite Backup Storage"]
-
-    DB --> Job
-    Obj --> Job
-    Cfg --> Job
-    Job -->|"dump / sync"| Staging
-    Staging -->|"encrypted transfer"| Offsite
+```text
+VPS -> restrictive staging -> tar.gz -> AES-256 GPG -> rclone copyto -> Google Drive
 ```
 
-Backup jobs run on a schedule (cron, orchestrated by `infrastructure/automation/`), dump or sync live data into a local staging area, then transfer the encrypted result offsite. Local staging is retained only long enough to guarantee a successful offsite transfer, per [STD-008 — Volume Standard](../03-standards/STD-008-volume-standard.md).
+The archive is uploaded to:
 
----
+```text
+<remote>:<base>/daily/<app-name>/<archive>.tar.gz.gpg
+<remote>:<base>/weekly/<app-name>/<archive>.tar.gz.gpg
+<remote>:<base>/monthly/<app-name>/<archive>.tar.gz.gpg
+```
 
-# 5. Schedule and Retention
+The same immutable archive is copied to multiple tiers when applicable.
+`rclone sync` is intentionally not used. Upload failure is non-zero and does
+not remove the local encrypted archive; removal happens only after all required
+`copyto` operations succeed.
 
-| Data Class | Frequency | Retention |
-|---|---|---|
-| Database dumps | Daily | 14 daily, 8 weekly, 6 monthly (grandfather-father-son rotation) |
-| Object storage sync | Daily | Mirrors current state plus 7 days of point-in-time snapshots, where the destination supports it |
-| Configuration archive | On every change, plus daily | 30 days |
+## 4. Schedule, retention, and safety
 
-Retention numbers are enforced by the backup job itself (pruning old backups after a successful new backup), never by manual cleanup.
+- Daily at 03:00 UTC.
+- Sunday: daily plus weekly.
+- Calendar day 1: daily plus monthly.
+- Keep newest 14 daily, 8 weekly, and 6 monthly objects per application.
+- Retention lists only a validated tier/app path and deletes exact objects with
+  `rclone deletefile`; it never targets a remote root.
+- `flock` prevents overlapping runs. Low disk space (`BACKUP_MIN_FREE_GB`,
+  default 3 GB) fails before archive creation.
+- The doctor checks dependencies, key/config permissions, remote access,
+  staging writability, application root, and free space.
 
----
+## 5. Encryption and recovery dependencies
 
-# 6. Storage Destination and Encryption
+GPG symmetric AES-256 encryption remains the format. `/srv/platform/backup/backup.key`
+must have a separate offline/secure copy: without it, `.gpg` archives cannot be
+decrypted. Google Drive rclone credentials must likewise be re-provisioned or
+re-authenticated on a replacement VPS; they are not stored in Git or inside
+the archive.
 
-- Backups are transferred to storage physically or logically separate from the production server (offsite), so that loss of the production server does not also destroy its backups.
-- All backup archives are encrypted at rest before or during transfer; the encryption key is never stored alongside the backup itself.
-- Access to the offsite backup destination is credentialed separately from production server SSH access, following least privilege.
+## 6. Verification
 
----
+Presence is not proof. Operators must list the object in Google Drive, decrypt
+it with the offline key, inspect the tar contents, and perform a restore test
+against a non-production target. See [OPS-004 — Backup](../04-operations/OPS-004-backup.md),
+[OPS-005 — Restore](../04-operations/OPS-005-restore.md), and the provider-
+agnostic [OPS-012 migration runbook](../04-operations/OPS-012-migrate-vps-provider.md).
 
-# 7. Verification
+## 7. References
 
-A backup that has never been restored is not a verified backup. [OPS-005 — Restore](../04-operations/OPS-005-restore.md) is exercised on a defined cadence (see [OPS-010 — Maintenance](../04-operations/OPS-010-maintenance.md)) against a non-production target to confirm that backup archives are actually restorable, not merely present.
-
----
-
-# 8. Summary
-
-Backup is scoped tightly to genuinely irreplaceable state — databases, object storage, and configuration — because source code and images are already durably stored in Git and GHCR. Every backup is scheduled, encrypted, rotated, and periodically restore-tested, so that disaster recovery ([ARCH-010](ARCH-010-disaster-recovery-architecture.md)) depends on a verified process rather than an assumed one.
-
----
-
-# 9. References
-
-- [ARCH-002 — Platform Architecture, Section 13](ARCH-002-platform-architecture.md#13-disaster-recovery-concept)
-- [ARCH-010 — Disaster Recovery Architecture](ARCH-010-disaster-recovery-architecture.md)
 - [ADR-0010 — Backup Strategy](../02-decisions/ADR-0010-backup-strategy.md)
-- [STD-008 — Volume Standard](../03-standards/STD-008-volume-standard.md)
 - [OPS-004 — Backup](../04-operations/OPS-004-backup.md)
 - [OPS-005 — Restore](../04-operations/OPS-005-restore.md)
+- [OPS-009 — Disaster Recovery](../04-operations/OPS-009-disaster-recovery.md)
+- [OPS-012 — Migrate VPS Provider](../04-operations/OPS-012-migrate-vps-provider.md)

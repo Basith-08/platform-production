@@ -33,6 +33,8 @@ This procedure defines the platform's recurring maintenance cadence: the routine
 | Restore-test a backup archive against a non-production target | Monthly | [OPS-005 — Restore](OPS-005-restore.md) |
 | Full disaster recovery drill (stand up a parallel server from backups) | Quarterly | [OPS-009 — Disaster Recovery](OPS-009-disaster-recovery.md) |
 | Review and apply pending Docker Engine / platform-service image updates | Monthly | [OPS-006 — Docker Upgrade](OPS-006-docker-upgrade.md) |
+| Confirm Docker image housekeeping ran and did not touch volumes | Weekly | `infrastructure/maintenance/cleanup-docker.sh` |
+| Confirm journald/logrotate disk limits | Monthly | `SystemMaxUse=300M`, `/etc/logrotate.d/platform` |
 | Review OS security patch status | Weekly (automated patching per [OPS-001](OPS-001-server-provisioning.md); manual review monthly) | [ARCH-007, Section 5](../01-architecture/ARCH-007-security-architecture.md#5-host-hardening-baseline) |
 | Review `docs/05-roadmap/technical-debt.md` for items resolved or newly discovered | Monthly | [ROADMAP — Technical Debt](../05-roadmap/technical-debt.md) |
 
@@ -74,4 +76,5 @@ If a scheduled maintenance task reveals a problem (e.g., a restore-test fails, a
 - [OPS-006 — Docker Upgrade](OPS-006-docker-upgrade.md)
 - [OPS-007 — Monitoring](OPS-007-monitoring.md)
 - [OPS-009 — Disaster Recovery](OPS-009-disaster-recovery.md)
+- [OPS-012 — Migrate VPS Provider](OPS-012-migrate-vps-provider.md)
 - [ROADMAP — Technical Debt](../05-roadmap/technical-debt.md)

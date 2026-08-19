@@ -1,69 +1,104 @@
 # OPS-005 — Restore
 
 **Status:** Approved
+**Version:** 2.0
+**Last Updated:** 2026-08-18
 
-**Version:** 1.0
+## 1. Preconditions
 
-**Owner:** Platform Team
+- A provisioned target server/non-production host.
+- The separate GPG `backup.key` copy and rclone config/authentication.
+- A selected exact object under `daily`, `weekly`, or `monthly`.
+- Application `.env`/platform configuration is restored before Compose starts.
 
-**Last Updated:** 2026-07-15
+## 2. Download and decrypt
 
----
+Run as `deploy` in a restrictive temporary directory. Replace placeholders;
+do not put secrets in shell history or logs.
 
-# 1. Purpose
+```bash
+restore_dir="$(mktemp -d)"
+chmod 700 "${restore_dir}"
+rclone --config /home/deploy/.config/rclone/rclone.conf copyto \
+  "gdrive-backup:platform-production/daily/invoice-api/invoice-api-<timestamp>.tar.gz.gpg" \
+  "${restore_dir}/backup.tar.gz.gpg"
+gpg --batch --decrypt --passphrase-file /srv/platform/backup/backup.key \
+  --output "${restore_dir}/backup.tar.gz" "${restore_dir}/backup.tar.gz.gpg"
+tar -xzf "${restore_dir}/backup.tar.gz" -C "${restore_dir}"
+```
 
-This procedure restores data from a backup created by [OPS-004 — Backup](OPS-004-backup.md), either for a single application's data recovery or as part of [OPS-009 — Disaster Recovery](OPS-009-disaster-recovery.md).
+Use `find "${restore_dir}" -maxdepth 2 -type f` to inspect the archive. Keep
+the decrypted directory local only for the restore and remove it securely
+after verification.
 
----
+## 3. Single application restore
 
-# 2. Preconditions
+1. Stop the target application's containers and take a copy of its current
+   target state if this is not a clean disaster-recovery host.
+2. Copy the archive's `.env` to `/srv/apps/<app-name>/.env`, mode `600`, and
+   copy `compose.yaml` from the application repository/Git deployment.
+3. Recreate the application database container without removing its volume:
 
-- Access to the offsite backup destination and its decryption key.
-- The target application's containers are stopped (for a single-application restore) or the target server is provisioned (for a full disaster recovery restore, per [OPS-001](OPS-001-server-provisioning.md)).
-- The specific backup archive to restore (by date) has been identified.
+   ```bash
+   cd /srv/apps/<app-name>
+   docker compose --env-file .env up -d db
+   docker compose --env-file .env exec -T db sh -lc \
+     'psql -U "$POSTGRES_USER" "$POSTGRES_DB"' < "${restore_dir}/<app>-<timestamp>/db.sql"
+   ```
 
----
+   The dump is plain SQL. Do not copy or restore `volumes/db-data`; it is
+   deliberately excluded because PostgreSQL recovery uses the logical dump.
+4. Restore non-database data with an exact source directory, for example:
 
-# 3. Procedure
+   ```bash
+   rsync -a "${restore_dir}/<app>-<timestamp>/volumes/" \
+     /srv/apps/<app-name>/volumes/
+   ```
 
-## 3.1 Single-Application Restore
+5. Start and verify:
 
-1. Stop the affected application's containers: `docker compose stop` inside `/srv/apps/<app-name>`, to avoid writes during restore.
-2. Download and decrypt the target backup archive from the offsite destination into a temporary location.
-3. For a PostgreSQL database: restore the dump with `pg_restore` (or `psql` for plain-text dumps) into the running database container, or recreate the volume from a full data restore if the dump format requires an empty target.
-4. For MinIO/object storage: sync the archived data back into `/srv/apps/<app-name>/volumes/<volume-name>`.
-5. For configuration: restore `.env` to `/srv/apps/<app-name>/.env`, setting mode `600` per [STD-005, Rule 6](../03-standards/STD-005-environment-variables.md#3-rules).
-6. Start the application: `docker compose up -d`.
+   ```bash
+   docker compose --env-file .env up -d
+   docker compose ps
+   ```
 
-## 3.2 Full Disaster Recovery Restore
+## 4. Platform state restore
 
-Executed as steps 6–7 of [ARCH-010, Section 5](../01-architecture/ARCH-010-disaster-recovery-architecture.md#5-full-server-recovery-sequence), after server provisioning ([OPS-001](OPS-001-server-provisioning.md)) and before bringing up platform services:
+Before deploying/running platform services, restore any present files from the
+`platform-<timestamp>` archive:
 
-1. Download and decrypt the most recent full backup archive from the offsite destination.
-2. Restore all `.env` files to their respective `/srv/apps/<app-name>/` and `/srv/platform/` locations.
-3. Restore Traefik dynamic configuration to `/srv/platform/traefik/`.
-4. For each application with a database or object storage volume, restore its data into `/srv/apps/<app-name>/volumes/` following Section 3.1, steps 3–4.
-5. Proceed to bringing up platform services and applications per [ARCH-010, Section 5](../01-architecture/ARCH-010-disaster-recovery-architecture.md#5-full-server-recovery-sequence).
+- `traefik/.env` -> `/srv/platform/traefik/.env`, mode `600`.
+- `monitoring/.env` -> `/srv/platform/monitoring/.env`, mode `600`.
+- `monitoring/beszel-data/` and `monitoring/kuma-data/` -> their matching
+  `/srv/platform/monitoring/` paths.
 
----
+Traefik ACME certificates are intentionally not restored; they are
+regenerable after DNS/credentials are correct. Do not restore anything into
+`/srv/platform/backup/` from the archive: its key/configuration are
+provisioned separately.
 
-# 4. Verification
+## 5. Full disaster recovery
 
-- The restored application starts and reports `healthy`.
-- Data integrity spot-check: query a known record (single-application restore) or confirm every application is reachable via Uptime Kuma (full restore).
-- Compare the restored data's timestamp against the expected RPO (see [ARCH-010, Section 3](../01-architecture/ARCH-010-disaster-recovery-architecture.md#3-recovery-objectives)) to confirm no unexpected data loss beyond the accepted RPO window.
+Follow [OPS-012 — Migrate VPS Provider](OPS-012-migrate-vps-provider.md) for
+the ordered old-server/new-server cutover. Deploy infrastructure from Git,
+deploy immutable application images from GHCR, restore platform/application
+state, then test before DNS cutover.
 
----
+## 6. Non-production restore test
 
-# 5. Rollback / Failure Handling
+Use a disposable Ubuntu/Docker host with an isolated hostname/network and a
+copy of the production `.env` whose external endpoints/credentials have been
+replaced with test values. Download/decrypt into `mktemp -d`, then restore the
+database dump into a Compose project named `restore-test` and restore uploads
+into a temporary `/srv/apps/restore-test/volumes` path. Never point the test at
+production DNS, production databases, or production object-storage endpoints.
+Verify a known row, expected upload, and application health; then stop/remove
+the test project and delete the decrypted directory. Do not run retention or
+delete commands against the production remote during this test.
 
-If a restore fails or produces corrupted data, do not delete the downloaded backup archive — retry the restore from a clean temporary location first, since a failed restore attempt does not indicate the source archive itself is corrupt. If multiple recent archives fail to restore cleanly, escalate to [OPS-008 — Incident Response](OPS-008-incident-response.md) and attempt restoring from an older archive, accepting the wider RPO.
-
----
-
-# 6. References
+## 7. References
 
 - [ARCH-008 — Backup Architecture](../01-architecture/ARCH-008-backup-architecture.md)
-- [ARCH-010 — Disaster Recovery Architecture](../01-architecture/ARCH-010-disaster-recovery-architecture.md)
 - [OPS-004 — Backup](OPS-004-backup.md)
 - [OPS-009 — Disaster Recovery](OPS-009-disaster-recovery.md)
+- [OPS-012 — Migrate VPS Provider](OPS-012-migrate-vps-provider.md)

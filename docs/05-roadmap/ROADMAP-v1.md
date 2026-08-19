@@ -12,7 +12,7 @@
 
 # 1. Purpose
 
-This document defines the scope of platform v1 (currently shipped as version `1.1.0`) — the current baseline described by every ARCH, ADR, STD, and OPS document in this repository. A minor version increment (e.g., `1.0.0` → `1.1.0`) that closes a gap within v1's own scope — such as automating platform-service deployment, per [ADR-0011](../02-decisions/ADR-0011-platform-service-deployment-pipeline.md) — does not itself constitute v2; see [ROADMAP v2](ROADMAP-v2.md) for what actually changes scope.
+This document defines the scope of platform v1 (currently shipped as version `1.2.0`) — the current baseline described by every ARCH, ADR, STD, and OPS document in this repository. Minor version increments that close reliability/security gaps within v1's own scope — including automated platform deployment and safe two-phase provisioning — do not themselves constitute v2; see [ROADMAP v2](ROADMAP-v2.md) for what actually changes scope.
 
 ---
 

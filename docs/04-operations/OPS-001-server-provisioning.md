@@ -2,102 +2,181 @@
 
 **Status:** Approved
 
-**Version:** 1.0
+**Version:** 1.1
 
 **Owner:** Platform Team
 
-**Last Updated:** 2026-07-15
+**Last Updated:** 2026-08-20
 
 ---
 
 # 1. Purpose
 
-This procedure provisions a new production server from a bare Ubuntu 24.04 LTS instance to a state ready to run platform services and applications. It is the first step of both initial platform setup and [OPS-009 — Disaster Recovery](OPS-009-disaster-recovery.md).
-
----
+Provision a fresh Ubuntu 24.04 LTS VPS into a platform-ready Docker runtime
+without putting a repository clone or application source code on the server.
+Provisioning and SSH hardening are separate phases so a failed installation
+does not lock out root or console recovery access.
 
 # 2. Preconditions
 
-- A fresh Ubuntu 24.04 LTS server (VPS or bare metal) with root or sudo SSH access.
-- DNS control for the domain(s) that will point at this server.
-- Access to the `platform-production` repository.
-- An SSH key pair designated for the platform deploy user, per [ARCH-007, Section 4.1](../01-architecture/ARCH-007-security-architecture.md#4-security-boundaries).
-
----
+- A fresh Ubuntu 24.04 LTS, `linux/amd64` server with provider console/root access.
+- A separate SSH key pair for the human `admin` account and for CI/CD `deploy`.
+- The bootstrap directory copied to the server through a trusted console or
+  workstation transfer. The server does not need a permanent
+  `platform-production` clone.
+- DNS control and access to GitHub repository secrets.
 
 # 3. Procedure
 
-1. **Create a non-root deploy user** and add its public key to `~/.ssh/authorized_keys`.
-   ```
-   adduser deploy
-   usermod -aG sudo deploy
-   mkdir -p /home/deploy/.ssh && chmod 700 /home/deploy/.ssh
-   echo "<deploy-public-key>" >> /home/deploy/.ssh/authorized_keys
-   chmod 600 /home/deploy/.ssh/authorized_keys
-   chown -R deploy:deploy /home/deploy/.ssh
-   ```
-2. **Harden SSH**, per [STD-010, Section 3.1](../03-standards/STD-010-security-standard.md#31-access-control): in `/etc/ssh/sshd_config`, set `PasswordAuthentication no` and `PermitRootLogin no`, then `systemctl restart sshd`.
-3. **Configure the firewall**, per [STD-010, Rule 4](../03-standards/STD-010-security-standard.md#31-access-control):
-   ```
-   ufw default deny incoming
-   ufw default allow outgoing
-   ufw allow 22/tcp
-   ufw allow 80/tcp
-   ufw allow 443/tcp
-   ufw enable
-   ```
-4. **Enable automatic OS security updates**: `apt install unattended-upgrades && dpkg-reconfigure -plow unattended-upgrades`.
-5. **Install Docker Engine, containerd, and the Compose plugin** from Docker's official APT repository, per [ADR-0007](../02-decisions/ADR-0007-docker-runtime.md):
-   ```
-   curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | tee /etc/apt/sources.list.d/docker.list
-   apt update
-   apt install docker-ce docker-ce-cli containerd.io docker-compose-plugin
-   usermod -aG docker deploy
-   ```
-6. **Create the directory layout**, per [ARCH-002, Section 10](../01-architecture/ARCH-002-platform-architecture.md#10-directory-mapping):
-   ```
-   mkdir -p /srv/platform/{traefik,monitoring,backup,networks}
-   mkdir -p /srv/apps
-   chown -R deploy:deploy /srv/platform /srv/apps
-   ```
-7. **Clone `platform-production`** into a working location (not `/srv`, which holds only runtime state per [ARCH-002, Section 10](../01-architecture/ARCH-002-platform-architecture.md#10-directory-mapping)):
-   ```
-   git clone https://github.com/<org>/platform-production.git ~/platform-production
-   ```
-8. **Create shared Docker networks**, per [ARCH-004, Section 4](../01-architecture/ARCH-004-network-architecture.md#4-rules):
-   ```
-   docker network create edge
-   docker network create platform-internal
-   ```
-9. **Populate each platform service's `.env`** from its `.env.example` (`infrastructure/traefik/.env.example`, `infrastructure/monitoring/.env.example`) directly on the server at `/srv/platform/<component>/.env`, mode `600` — this step cannot be automated, since a populated `.env` is never committed to Git, per [STD-005](../03-standards/STD-005-environment-variables.md).
-10. **Add the deploy key as a GitHub Actions secret** (`PROD_HOST`, `PROD_DEPLOY_USER`, `PROD_DEPLOY_KEY`) on the `platform-production` repository itself, and on every application repository that will deploy to this server.
-11. **Deploy platform services** (Traefik, Beszel, Uptime Kuma, backup automation) from `infrastructure/` by pushing to `platform-production`'s `main` branch (or running the `Deploy Platform` workflow manually with no `component` input, to deploy every component at once for this first run) — see [OPS-011 — Deploy Platform Service](OPS-011-deploy-platform-service.md). This replaces running `docker compose up -d` by hand; the manual command remains available only as the emergency path in [OPS-011, Section 3.4](OPS-011-deploy-platform-service.md#34-manual--emergency-path).
-12. **Point DNS** for every platform-service hostname (e.g., monitoring dashboards) at the server's public IP.
+## 3.1 Prepare and transfer bootstrap
 
----
+1. Generate two key pairs on a trusted workstation. Keep private keys off the
+   server and never commit them:
 
-# 4. Verification
+   ```text
+   prod-sby-01-admin       -> human/operator SSH
+   prod-sby-01-deploy      -> GitHub Actions SSH
+   ```
 
-- `ssh deploy@<server>` succeeds with key-based auth; password auth attempts are refused.
-- `docker compose version` and `docker network ls` show `edge` and `platform-internal`.
-- Traefik responds on `https://<platform-domain>` with a valid TLS certificate.
-- Beszel and Uptime Kuma dashboards are reachable through Traefik and require authentication.
+2. Transfer `infrastructure/automation/bootstrap.sh`,
+   `infrastructure/automation/install-rclone.sh`, and
+   `infrastructure/automation/platform-doctor.sh`, plus both public keys, to a
+   root-only directory such as `/root/bootstrap/` using the provider console or
+   an already trusted root session.
 
----
+## 3.2 Provision phase
 
-# 5. Rollback / Failure Handling
+Run as root:
 
-If provisioning fails partway through, re-running this procedure from the failed step is safe — every step is idempotent (user creation, package installation, directory creation, and network creation all no-op or safely update on re-run). If the server is unrecoverable, discard it and re-provision a new instance from Step 1; no state on a partially-provisioned server is depended upon elsewhere.
+```bash
+/root/bootstrap/bootstrap.sh provision \
+  --hostname prod-sby-01 \
+  --admin-key /root/bootstrap/prod-sby-01-admin.pub \
+  --deploy-key /root/bootstrap/prod-sby-01-deploy.pub
+```
 
----
+The phase validates Ubuntu/architecture, DNS, keys, users, packages, pinned
+rclone `1.75.0`, Docker/Compose, UFW, directories, journald, and logrotate.
+It creates:
 
-# 6. References
+- `admin`: human/operator account, sudo group, personal key. Set its local
+  password from the provider console with `passwd admin` so standard sudo can
+  authenticate.
+- `deploy`: CI account, deploy key, Docker group, no password and no general
+  sudo membership. Docker-group membership is effectively root-equivalent;
+  removing sudo does not make this account unprivileged.
 
-- [ARCH-002 — Platform Architecture, Section 10](../01-architecture/ARCH-002-platform-architecture.md#10-directory-mapping)
-- [ARCH-006 — Runtime Architecture](../01-architecture/ARCH-006-runtime-architecture.md)
+Provision completion writes `/var/lib/platform/provisioned`. It does **not**
+disable root SSH, password authentication, or reload SSH.
+
+## 3.3 Verify access, then harden SSH
+
+1. Run the read-only host report:
+
+   ```bash
+   /root/bootstrap/platform-doctor.sh host
+   ```
+
+2. From new workstation terminals, verify both accounts:
+
+   ```bash
+   ssh -i prod-sby-01-admin admin@<server>
+   ssh -i prod-sby-01-deploy deploy@<server> 'docker compose version'
+   ```
+
+3. After both sessions work, from the root/console session run:
+
+   ```bash
+   /root/bootstrap/bootstrap.sh harden
+   ```
+
+   The command writes a drop-in, runs `/usr/sbin/sshd -t`, restores the
+   previous drop-in on syntax failure, reloads `ssh.service`, and verifies the
+   effective SSH settings. It uses reload rather than restart.
+
+4. Open new admin and deploy sessions again. Root SSH and password SSH must now
+   be refused while key-based access remains available.
+
+## 3.4 Record host identity and configure access
+
+1. From the provider console, record the fingerprint of the host public key:
+
+   ```bash
+   ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+   ```
+
+2. From a trusted workstation, obtain the host-key line with `ssh-keyscan` and
+   compare its fingerprint with the console result. Store the verified line(s)
+   as the protected GitHub secret `PROD_KNOWN_HOSTS`. Workflows must use this
+   value; they must not learn a new production key during deployment.
+
+3. Configure these secrets on the `platform-production` repository and each
+   application repository that deploys to this host:
+
+   ```text
+   PROD_HOST
+   PROD_DEPLOY_USER=deploy
+   PROD_DEPLOY_KEY=<private CI key>
+   PROD_KNOWN_HOSTS=<verified known_hosts entry>
+   ```
+
+   Keep the human private key separate from the CI secret. A host rebuild or
+   migration requires an intentional fingerprint review and secret update.
+
+## 3.5 Runtime configuration and deployment
+
+1. Populate runtime files out of band, all mode `600` and owned by `deploy`:
+   platform `.env` files, backup files/key, rclone config, Traefik generated
+   credentials, and application `.env` files. Use [OPS-013](OPS-013-manual-configuration-inventory.md).
+2. Run the backup preflight after configuring the rclone OAuth/config:
+
+   ```bash
+   /srv/platform/backup/backup-doctor.sh
+   ```
+
+3. Run the `Deploy Platform` workflow. A full deployment always runs
+   `networks` first; Traefik and monitoring then run independently. Do not
+   manually create shared networks during the normal path.
+4. Run:
+
+   ```bash
+   /srv/platform/automation/platform-doctor.sh full
+   ```
+
+5. Configure DNS/TLS, monitoring accounts, backup OAuth/key, and application
+   routing as described by the relevant OPS runbooks.
+
+# 4. Node identity and DNS
+
+`prod-sby-01` is the Linux hostname and deterministic node identity. It does
+not need to resolve publicly. DNS application hostnames such as
+`api.example.com`, and the platform domain used by Traefik, are separate
+configuration concerns and may point to the node independently.
+
+# 5. Existing host migration
+
+Do not run provisioning automatically from `deploy-platform.yml`. The existing
+host may continue using its current `deploy` access until an operator performs
+an explicit migration: create/test `admin`, install its separate key, verify
+sudo, review/remove any `deploy` sudo membership, record `PROD_KNOWN_HOSTS`,
+then harden/reload SSH. Platform deployment only syncs `/srv/platform` files
+and never changes users, sudoers, or sshd configuration.
+
+# 6. Rollback / failure handling
+
+If `provision` fails, the structured report identifies the step, line, command,
+and exit code. Until the provision marker exists and `harden` completes, the
+host is intentionally not SSH-hardened; use the root/console path to correct
+the issue and rerun `provision`. Reruns preserve users, keys, `/srv` data,
+Docker state, and runtime files. A failed `harden` syntax check restores the
+previous drop-in and does not reload an invalid configuration.
+
+# 7. References
+
+- [ARCH-002 — Platform Architecture](../01-architecture/ARCH-002-platform-architecture.md)
 - [ARCH-007 — Security Architecture](../01-architecture/ARCH-007-security-architecture.md)
 - [STD-005 — Environment Variables](../03-standards/STD-005-environment-variables.md)
 - [STD-010 — Security Standard](../03-standards/STD-010-security-standard.md)
 - [OPS-009 — Disaster Recovery](OPS-009-disaster-recovery.md)
 - [OPS-011 — Deploy Platform Service](OPS-011-deploy-platform-service.md)
+- [OPS-013 — Manual Configuration Inventory](OPS-013-manual-configuration-inventory.md)

@@ -1,63 +1,48 @@
-# ADR-0010 — Scheduled Encrypted Backups Scoped to Irreplaceable Data
+# ADR-0010 — Scheduled Encrypted Backups to Google Drive
 
 **Status:** Accepted
-
-**Version:** 1.0
-
+**Version:** 2.0
 **Owner:** Platform Team
+**Last Updated:** 2026-08-18
 
-**Last Updated:** 2026-07-15
+## 1. Context
 
----
+Git and GHCR can regenerate infrastructure and application images, but runtime
+databases, uploads/object storage, monitoring state, and secrets cannot. A
+20 GB VPS also cannot safely retain unlimited local copies. Provider snapshots
+would couple recovery to the provider being replaced.
 
-# 1. Context
+## 2. Decision
 
-Because production never stores source code ([ADR-0002](ADR-0002-git-source-of-truth.md)) and images are durably stored in GHCR ([ADR-0004](ADR-0004-ghcr.md)), the only genuinely irreplaceable state on the production server is runtime data: databases, object storage, and configuration/secrets. A backup strategy needs to define what is backed up, how often, and where, without over-scoping to data that Git and GHCR already protect.
+Use scheduled, local-streamed, AES-256 GPG-encrypted archives and upload them
+with `rclone copyto` to Google Drive. The remote is configured out-of-band by
+the operator. PostgreSQL is backed up only as a logical dump from the database
+container; `db-data/` is excluded from volume rsync. Retention is newest
+14 daily / 8 weekly / 6 monthly per application, with exact-file deletion.
 
----
+Keep only non-regenerable platform state and application persistent data.
+Exclude source, images/cache, containers, writable layers, ACME certificates,
+and all backup credentials. A separate offline copy of `backup.key` and a
+recoverable rclone authentication path are mandatory recovery dependencies.
 
-# 2. Decision
+## 3. Consequences
 
-Automated, scheduled backup jobs (defined under `infrastructure/backup/`) capture application databases, object storage data, and configuration/secrets on a recurring schedule, encrypt them, and transfer them to storage physically separate from the production server. Application source code and container images are explicitly excluded from backup scope, since they are already durably stored in Git and GHCR respectively.
+Positive: offsite/provider-independent recovery, bounded local disk usage,
+immutable image redeployment, clear database restore semantics, and no remote
+destructive sync. Negative: Google Drive authentication and the GPG key need
+manual recovery provisioning; logical dumps require a running compatible
+PostgreSQL service during restore; restore tests remain an operational duty.
 
----
+## 4. Rejected alternatives
 
-# 3. Alternatives Considered
+- Full disk/provider snapshots: provider-coupled and include regenerable data.
+- `rclone sync`: can delete remote backups after local staging drift.
+- Physical PostgreSQL volume copy: unsafe/inconsistent while the database runs.
+- No automated backup: leaves RPO and recovery unverified.
 
-## 3.1 Full server/disk image backups
-
-Simpler to reason about ("back up everything"), but wasteful and slower to restore: it re-backs-up data (source code, if it were ever present; installed packages) that is either forbidden on production by platform rules or trivially reprovisioned from `docs/04-operations/OPS-001-server-provisioning.md`. Rejected in favor of targeted, faster, cheaper backups scoped to genuinely irreplaceable data.
-
-## 3.2 No automated backup (manual, ad hoc snapshots)
-
-Rejected outright: violates the Automation First and Reproducibility principles ([ARCH-001](../01-architecture/ARCH-001-platform-vision.md)) and makes disaster recovery RPO undefined and unreliable.
-
----
-
-# 4. Consequences
-
-## 4.1 Positive
-
-- Backup jobs run and complete quickly because they only handle data that actually needs protecting.
-- Clear, auditable backup scope (Section 3 of [ARCH-008 — Backup Architecture](../01-architecture/ARCH-008-backup-architecture.md)) removes ambiguity about what is and isn't protected.
-- Backup storage costs stay proportional to actual data volume, not the entire server's disk.
-
-## 4.2 Negative / Accepted Trade-offs
-
-- If the platform's rule against storing source code or building on production is ever violated in practice (configuration drift), that data would not be backed up. This is mitigated by the rule being structurally enforced (Section 4 of [ADR-0001](ADR-0001-runtime-only.md)) rather than relying on backup as a safety net for a rule violation.
-
----
-
-# 5. Related Decisions
-
-- [ADR-0002 — Git Source of Truth](ADR-0002-git-source-of-truth.md)
-- [ADR-0004 — GHCR](ADR-0004-ghcr.md)
-
----
-
-# 6. References
+## 5. References
 
 - [ARCH-008 — Backup Architecture](../01-architecture/ARCH-008-backup-architecture.md)
-- [ARCH-010 — Disaster Recovery Architecture](../01-architecture/ARCH-010-disaster-recovery-architecture.md)
 - [OPS-004 — Backup](../04-operations/OPS-004-backup.md)
 - [OPS-005 — Restore](../04-operations/OPS-005-restore.md)
+- [OPS-012 — Migrate VPS Provider](../04-operations/OPS-012-migrate-vps-provider.md)

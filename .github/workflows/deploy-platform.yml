@@ -1,7 +1,8 @@
 name: Deploy Platform
 
 # Deploys platform-service infrastructure (infrastructure/traefik,
-# infrastructure/monitoring, infrastructure/backup, infrastructure/networks,
+# infrastructure/monitoring, infrastructure/backup, infrastructure/maintenance,
+# infrastructure/networks,
 # and any future infrastructure/<component> directory) to the production
 # server. Triggers on every push to main that touches infrastructure/, and
 # deploys only the components whose files actually changed — never a full
@@ -26,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       component:
-        description: "Deploy a single component only (e.g. traefik, monitoring, backup, networks). Leave blank to deploy every component that changed in the most recent push, or every component if no prior push context is available."
+        description: "Deploy a single component only (e.g. traefik, monitoring, backup, maintenance, networks). Leave blank to deploy every component that changed in the most recent push, or every component if no prior push context is available."
         required: false
         type: string
 
@@ -45,9 +46,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       components: ${{ steps.plan.outputs.components }}
+      non_network: ${{ steps.plan.outputs.non_network }}
+      networks_selected: ${{ steps.plan.outputs.networks_selected }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -60,13 +63,25 @@ jobs:
           AFTER_SHA: ${{ github.sha }}
           MANUAL_COMPONENT: ${{ github.event.inputs.component }}
 
-  deploy:
-    name: Deploy
+  deploy_networks:
+    name: Deploy networks first
     needs: plan
-    if: needs.plan.outputs.components != '[]'
+    if: needs.plan.outputs.networks_selected == 'true'
+    uses: ./.github/workflows/deploy-component.yml
+    with:
+      component: networks
+    secrets: inherit
+
+  deploy:
+    name: Deploy independent components
+    needs: [plan, deploy_networks]
+    if: >-
+      always() &&
+      needs.plan.outputs.non_network != '[]' &&
+      (needs.deploy_networks.result == 'success' || needs.deploy_networks.result == 'skipped')
     strategy:
       matrix:
-        component: ${{ fromJson(needs.plan.outputs.components) }}
+        component: ${{ fromJson(needs.plan.outputs.non_network) }}
       fail-fast: false
     uses: ./.github/workflows/deploy-component.yml
     with:
@@ -75,7 +90,7 @@ jobs:
 
   report:
     name: Deployment report
-    needs: [plan, deploy]
+    needs: [plan, deploy_networks, deploy]
     if: always() && needs.plan.outputs.components != '[]'
     runs-on: ubuntu-latest
     steps:
@@ -89,11 +104,14 @@ jobs:
             echo "| Commit | \`${{ github.sha }}\` |"
             echo "| Triggered by | \`${{ github.event_name }}\` |"
             echo "| Components deployed | \`${{ needs.plan.outputs.components }}\` |"
-            echo "| Result | \`${{ needs.deploy.result }}\` |"
+            echo "| Network prerequisite | \`${{ needs.deploy_networks.result }}\` |"
+            echo "| Component matrix | \`${{ needs.deploy.result }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail the run if any component deployment failed
-        if: needs.deploy.result != 'success'
+        if: >-
+          (needs.plan.outputs.networks_selected == 'true' && needs.deploy_networks.result != 'success') ||
+          (needs.plan.outputs.non_network != '[]' && needs.deploy.result != 'success')
         run: |
           echo "One or more component deployments did not succeed — see the deploy job matrix above." >&2
           exit 1

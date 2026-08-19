@@ -53,7 +53,8 @@ flowchart TB
 
 - SSH key-based authentication only. Password authentication is disabled at the `sshd` level on the production server (see [OPS-001 — Server Provisioning](../04-operations/OPS-001-server-provisioning.md)).
 - The GitHub Actions deploy step authenticates using a dedicated deploy key, scoped only to the production server's deploy user, distinct from any personal developer credential.
-- The deploy user on the production server has the minimum permissions required to run `docker compose pull` and `docker compose up -d` within `/srv/apps` and `/srv/platform` — not unrestricted root SSH access where avoidable.
+- The `deploy` user has no general sudo membership, but it is a Docker-group member because CI must operate Compose. Docker-group membership is effectively root-equivalent; the primary boundary is separation of human `admin` credentials from the CI credential, not a claim that `deploy` is unprivileged.
+- Production workflows use a verified `PROD_KNOWN_HOSTS` value with strict host-key checking; they do not trust an arbitrary key returned by the target during deployment.
 - A host firewall (`ufw` or equivalent) permits only ports 22 (SSH, ideally IP-restricted or rate-limited), 80, and 443 inbound.
 
 ## 4.2 Secrets

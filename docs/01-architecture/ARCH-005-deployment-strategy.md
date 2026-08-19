@@ -2,11 +2,11 @@
 
 **Status:** Approved
 
-**Version:** 1.0
+**Version:** 1.1
 
 **Owner:** Platform Team
 
-**Last Updated:** 2026-07-15
+**Last Updated:** 2026-08-20
 
 ---
 
@@ -60,14 +60,17 @@ sequenceDiagram
     CI->>CI: Run tests
     CI->>CI: docker build
     CI->>Reg: docker push <sha>
-    CI->>Prod: SSH — docker compose pull
-    CI->>Prod: SSH — docker compose up -d
+    CI->>Prod: SSH — sync compose.yaml only
+    CI->>Prod: SSH — config, pull, up -d
     Prod->>Prod: Container healthcheck
     Prod-->>CI: Success / Failure
     CI-->>Dev: Workflow result notification
 ```
 
-Every step in this sequence is mandatory and automated. There is no manual step in the standard path, per the Automation First principle ([ARCH-001](ARCH-001-platform-vision.md)).
+Every step in this sequence is mandatory and automated. The runtime `.env` and
+volumes remain operator-owned on the server; only the tracked manifest and
+immutable image tag change in the deployment step. There is no manual step in
+the standard path, per the Automation First principle ([ARCH-001](ARCH-001-platform-vision.md)).
 
 ---
 
@@ -118,7 +121,8 @@ sequenceDiagram
     Repo->>CI: deploy-platform.yml triggered
     CI->>CI: Determine changed components
     CI->>CI: Validate compose.yaml / crontab
-    CI->>Prod: SSH — rsync infrastructure/<component>/ to /srv/platform/<component>/
+    CI->>Prod: SSH — stage and validate tracked component files
+    CI->>Prod: SSH — promote excluding runtime state
     Prod->>Prod: docker compose pull (or install crontab / create-networks.sh)
     Prod->>Prod: docker compose up -d
     Prod->>Prod: Poll container health
@@ -132,6 +136,8 @@ Key differences from application deployment (Sections 3–10), and what stays th
 - **No image tag, no GHCR:** the deployed artifact is configuration (`compose.yaml`, `traefik.yml`, dynamic middleware, `crontab`), synced with `rsync`, not an image pulled by SHA. The image reference inside `compose.yaml` (e.g., `traefik:v3.7`) is a pinned version tag, per [STD-001, Rule 4](../03-standards/STD-001-compose-standard.md#3-rules), and is itself part of what gets synced and reviewed in the pull request.
 - **Component-scoped concurrency, not whole-pipeline concurrency:** each `infrastructure/<component>` deploys independently, per [STD-011, Rule 5](../03-standards/STD-011-platform-deployment-pipeline-standard.md#3-rules) — unlike Section 7, which only needs to describe one application's own serialization, this pipeline must also guarantee unrelated components never block each other.
 - **Health verification and downtime expectations are unchanged:** Section 8 and Section 9 apply identically — a platform-service container is not considered deployed until it reports healthy, and a brief interruption during recreation is expected for the same single-replica reason.
+- **Fresh deployment ordering:** when `networks` is selected, it completes before the remaining selected components. A change to only Traefik or only monitoring does not redeploy networks.
+- **Host identity:** both platform and application workflows use a verified `PROD_KNOWN_HOSTS` secret with strict host-key checking.
 
 Full procedure: [OPS-011 — Deploy Platform Service](../04-operations/OPS-011-deploy-platform-service.md). Full pipeline rules: [STD-011 — Platform Deployment Pipeline Standard](../03-standards/STD-011-platform-deployment-pipeline-standard.md).
 

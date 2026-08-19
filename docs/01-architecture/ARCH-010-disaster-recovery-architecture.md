@@ -27,7 +27,7 @@ Covers recovery objectives, disaster scenario classification, and the architectu
 | Metric | Target | Rationale |
 |---|---|---|
 | Recovery Time Objective (RTO) | 4 hours | Bounded by time to provision a new server, restore configuration, and restore the most recent backup — see Section 5 |
-| Recovery Point Objective (RPO) | 24 hours | Bounded by daily backup frequency, per [ARCH-008, Section 5](ARCH-008-backup-architecture.md#5-schedule-and-retention) |
+| Recovery Point Objective (RPO) | 24 hours | Bounded by daily backup frequency, per [ARCH-008, Section 4](ARCH-008-backup-architecture.md#4-schedule-retention-and-safety) |
 
 These targets apply to a total loss of the production server. Partial failures (a single application crashing) are handled by [OPS-008 — Incident Response](../04-operations/OPS-008-incident-response.md) and typically resolve in minutes, not hours.
 
@@ -54,11 +54,11 @@ The common thread across every scenario: because application source code and ima
 flowchart TB
     A["1. Provision new Ubuntu 24.04 LTS server"]
     B["2. Install Docker Engine, Compose plugin, containerd"]
-    C["3. Clone platform-production repository"]
+    C["3. Transfer bootstrap bundle; run provision and harden"]
     D["4. Recreate /srv/platform and /srv/apps directory layout"]
-    E["5. Recreate Docker networks (edge, platform-internal, per-app)"]
-    F["6. Restore .env files and configuration from encrypted backup"]
-    G["7. Restore persistent volumes from latest backup"]
+    E["5. Deploy networks through GitHub Actions; app networks via Compose"]
+    F["6. Provision rclone/key; restore .env/config from encrypted backup"]
+    G["7. Restore logical DB dumps and non-DB persistent data"]
     H["8. Bring up platform services (Traefik, Beszel, Uptime Kuma)"]
     I["9. For each application: docker compose pull && docker compose up -d"]
     J["10. Validate health via Uptime Kuma and Beszel"]
@@ -74,14 +74,15 @@ Ordering matters: platform services (Traefik, monitoring) come up before applica
 
 # 6. Dependencies for Recovery
 
-Recovery depends on exactly four external assets, none of which live on the production server:
+Recovery depends on five external assets, none of which live on the production server:
 
 1. **`platform-production` repository (GitHub)** — provides infrastructure configuration and this documentation.
 2. **Application repositories (GitHub)** — provide the last known-good commit SHA to redeploy.
 3. **GHCR** — provides the actual container images, addressed by commit SHA.
-4. **Offsite backup storage** — provides data and configuration state.
+4. **Offsite backup storage** — provides encrypted data and configuration state.
+5. **Offline GPG key and rclone recovery credentials** — decrypt and access the backup; provisioned separately.
 
-Because none of these four assets are hosted on the production server itself, the production server's own failure never puts recovery at risk.
+Because none of these five assets are hosted on the production server itself, the production server's own failure never puts recovery at risk.
 
 ---
 

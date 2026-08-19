@@ -2,11 +2,11 @@
 
 **Status:** Approved
 
-**Version:** 1.0
+**Version:** 1.1
 
 **Owner:** Platform Team
 
-**Last Updated:** 2026-07-15
+**Last Updated:** 2026-08-20
 
 ---
 
@@ -28,8 +28,11 @@ Applies to the production server, every `compose.yaml`, every `Dockerfile`, and 
 
 1. SSH password authentication **must** be disabled on the production server (`PasswordAuthentication no` in `sshd_config`).
 2. Root SSH login **must** be disabled (`PermitRootLogin no`).
-3. The GitHub Actions deploy key **must** be dedicated to CI/CD use and **must not** be reused as a personal developer key.
-4. The host firewall **must** default-deny inbound traffic and explicitly allow only ports 22, 80, and 443.
+3. Human administration **must** use the separate `admin` account and personal key; GitHub Actions **must** use the separate `deploy` account and CI key.
+4. `deploy` **must not** be a general sudo member. It may be a Docker-group member because deployment requires Docker; Docker group membership is effectively root-equivalent and is not an unprivileged boundary.
+5. The GitHub Actions deploy key **must** be dedicated to CI/CD use and **must not** be reused as a personal developer key.
+6. The host firewall **must** default-deny inbound traffic and explicitly allow only ports 22, 80, and 443.
+7. Production workflows **must** use a verified `PROD_KNOWN_HOSTS` value with strict host-key checking; dynamically learned `ssh-keyscan` output is not an accepted trust mechanism.
 
 ## 3.2 Secrets
 
@@ -47,12 +50,13 @@ Applies to the production server, every `compose.yaml`, every `Dockerfile`, and 
 10. Production **must never** execute `docker build`, `git clone`, or `git pull` for application source code, per [ADR-0001](../02-decisions/ADR-0001-runtime-only.md).
 11. Every application image **must** be tagged with a Git commit SHA, never `latest`, per [STD-004, Rule 1](STD-004-docker-image-standard.md#3-rules).
 12. Base images **must** be version-pinned, per [STD-004, Rule 3](STD-004-docker-image-standard.md#3-rules).
+13. Host-installed rclone **must** use the pinned release and checksum in `infrastructure/automation/install-rclone.sh`; floating `latest` installers are prohibited.
 
 ## 3.5 Container Hardening
 
-13. Application containers **must** run as a non-root user, per [STD-004, Rule 4](STD-004-docker-image-standard.md#3-rules).
-14. The Docker socket **must not** be mounted into any application container. It **may** be mounted, read-only, into the platform's metrics collection service only.
-15. Every service **must** declare explicit resource limits, per [STD-001, Rule 3](STD-001-compose-standard.md#3-rules), so a compromised or malfunctioning container cannot exhaust host resources.
+14. Application containers **must** run as a non-root user, per [STD-004, Rule 4](STD-004-docker-image-standard.md#3-rules).
+15. The Docker socket **must not** be mounted into any application container. It **may** be mounted, read-only, into the platform's metrics collection service only.
+16. Every service **must** declare explicit resource limits, per [STD-001, Rule 3](STD-001-compose-standard.md#3-rules), so a compromised or malfunctioning container cannot exhaust host resources.
 
 ---
 

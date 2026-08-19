@@ -40,7 +40,7 @@ Rejected for the same reason it was rejected in [ADR-0001](ADR-0001-runtime-only
 
 - Every infrastructure change is reviewable via pull request before it reaches production.
 - Full history of every configuration change is preserved in Git, supporting audit and incident post-mortems.
-- Disaster recovery is reduced to "clone the repositories and redeploy," rather than "reconstruct undocumented server state" (see [ARCH-010](../01-architecture/ARCH-010-disaster-recovery-architecture.md)).
+- Disaster recovery is reduced to "obtain the repositories on a trusted workstation and redeploy," rather than "reconstruct undocumented server state"; the production VPS itself does not keep a permanent repository clone (see [ARCH-010](../01-architecture/ARCH-010-disaster-recovery-architecture.md)).
 
 ## 4.2 Negative / Accepted Trade-offs
 

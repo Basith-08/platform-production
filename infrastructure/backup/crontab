@@ -11,4 +11,4 @@
 # Section 10 — Directory Mapping), not the working clone used at
 # provisioning time. This file itself is installed as the deploy user's
 # crontab by infrastructure/automation/deploy-component.sh.
-0 3 * * * /srv/platform/backup/run-backup.sh >> /var/log/platform-backup.log 2>&1
+0 3 * * * /srv/platform/backup/run-backup.sh >> /var/log/platform/backup.log 2>&1

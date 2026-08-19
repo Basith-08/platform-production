@@ -2,11 +2,11 @@
 
 **Status:** Approved
 
-**Version:** 1.0
+**Version:** 1.1
 
 **Owner:** Platform Team
 
-**Last Updated:** 2026-07-15
+**Last Updated:** 2026-08-20
 
 ---
 
@@ -30,10 +30,13 @@ Applies to `.github/workflows/deploy-platform.yml`, `.github/workflows/deploy-co
 4. Each component **must** deploy through a single reusable workflow (`workflow_call`), invoked once per changed component, so that adding a new platform-service component never requires a new workflow file — only a new `infrastructure/<component>/` directory.
 5. Concurrency **must** be scoped per component (`concurrency: group: deploy-platform-<component>, cancel-in-progress: false`), never by the whole pipeline, so that an in-flight deployment of one component never blocks or is blocked by a deployment of an unrelated component.
 6. The deploy step **must** connect to the production server over SSH using the same class of dedicated deploy key used for application deployments (`PROD_HOST`, `PROD_DEPLOY_USER`, `PROD_DEPLOY_KEY`, stored as encrypted repository secrets on `platform-production`), per [ARCH-007, Section 4.1](../01-architecture/ARCH-007-security-architecture.md#4-security-boundaries).
-7. Syncing a component's files to the server **must** exclude every path that holds runtime state or secrets not tracked in Git: `.env`, TLS certificate storage, per-service data directories (e.g., `beszel-data/`, `kuma-data/`), backup staging, `backup.key`, and any generated credential file (e.g., `dashboard-users.htpasswd`), per [STD-005 — Environment Variables](STD-005-environment-variables.md) and [ARCH-007, Section 4.2](../01-architecture/ARCH-007-security-architecture.md#4-security-boundaries). A sync **must not** delete an excluded path even when using a mirroring transfer mode.
-8. The pipeline **must** verify the deployed component before reporting success: for a Compose-based component, every container **must** report `healthy` (or, absent a healthcheck, `running`) within a bounded retry window; a failed verification **must** fail the workflow with a non-zero exit status and surface the component's logs.
-9. The pipeline **must** produce a deployment report summarizing the triggering commit, the components deployed, and the result, visible on the workflow run (e.g., a `$GITHUB_STEP_SUMMARY` entry).
-10. No secret value **may** be echoed, printed, or written to a log step at any point in the workflow, per [STD-009, Rule 8](STD-009-github-actions-standard.md#3-rules).
+7. Syncing a component **must** stage tracked files before live apply, validate the staged Compose configuration against the live runtime `.env`, and promote with exclusions for every runtime state/secret path: `*.env`, TLS certificate storage, per-service data directories, backup staging, `backup.key`, rclone config, and generated credentials. A sync **must not** delete an excluded path even when using a mirroring transfer mode.
+8. If a component has `prepare.sh`, the pipeline **must** run it idempotently before apply. Preparation may create missing bind directories but must not delete or recreate persistent data.
+9. The pipeline **must** verify the deployed component before reporting success: for a Compose-based component, every active container **must** report `healthy` (or, absent a healthcheck, `running`) within a bounded retry window; a failed verification **must** fail the workflow with a non-zero exit status and surface the component's logs.
+10. When `networks` is selected with other components, it **must** complete successfully before the other matrix components start. If it is not selected, it must not be redeployed as an unnecessary prerequisite.
+11. Production SSH **must** use verified `PROD_KNOWN_HOSTS` with strict host-key checking; dynamically learned keys are prohibited.
+12. The pipeline **must** produce a deployment report summarizing the triggering commit, the components deployed, and the result, visible on the workflow run (e.g., a `$GITHUB_STEP_SUMMARY` entry).
+13. No secret value **may** be echoed, printed, or written to a log step at any point in the workflow, per [STD-009, Rule 8](STD-009-github-actions-standard.md#3-rules).
 
 ---
 

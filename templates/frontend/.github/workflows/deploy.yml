@@ -17,7 +17,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Run tests
         run: |
           source build.env
@@ -28,13 +28,22 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Validate requested deploy SHA
+        env:
+          REQUESTED_SHA: ${{ inputs.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "${REQUESTED_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo "Deploy SHA must be a 40-character commit SHA." >&2; exit 1; }
+
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.sha || github.sha }}
 
       - name: Resolve deploy SHA
         id: sha
-        run: echo "sha=${{ inputs.sha || github.sha }}" >> "$GITHUB_OUTPUT"
+        env:
+          REQUESTED_SHA: ${{ inputs.sha || github.sha }}
+        run: echo "sha=${REQUESTED_SHA}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/login-action@v3
         with:
@@ -57,14 +66,66 @@ jobs:
             -t ghcr.io/${{ github.repository_owner }}/app-name:${{ steps.sha.outputs.sha }} .
           docker push ghcr.io/${{ github.repository_owner }}/app-name:${{ steps.sha.outputs.sha }}
 
-      - name: Deploy to production
-        uses: appleboy/ssh-action@v1
+      - name: Load production deploy key
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_DEPLOY_USER }}
-          key: ${{ secrets.PROD_DEPLOY_KEY }}
-          script: |
-            cd /srv/apps/app-name
-            sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=${{ steps.sha.outputs.sha }}|" .env
-            docker compose pull
-            docker compose up -d
+          ssh-private-key: ${{ secrets.PROD_DEPLOY_KEY }}
+
+      - name: Trust production host key
+        env:
+          PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [ -n "${PROD_KNOWN_HOSTS}" ] || { echo "PROD_KNOWN_HOSTS is required." >&2; exit 1; }
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${PROD_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Validate deployment manifest
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          trap 'rm -f .env' EXIT
+          IMAGE_TAG="${{ steps.sha.outputs.sha }}" docker compose config -q
+
+      - name: Synchronize deployment manifest
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_DEPLOY_USER: ${{ secrets.PROD_DEPLOY_USER }}
+          DEPLOY_SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=yes "${PROD_DEPLOY_USER}@${PROD_HOST}" \
+            'test -d /srv/apps/app-name && test -f /srv/apps/app-name/.env || { echo "Missing /srv/apps/app-name/.env; provision runtime configuration first." >&2; exit 1; }'
+          rsync -az --checksum --chmod=F644 -e "ssh -o StrictHostKeyChecking=yes" compose.yaml \
+            "${PROD_DEPLOY_USER}@${PROD_HOST}:/srv/apps/app-name/.compose.yaml.${DEPLOY_SHA}.tmp"
+          ssh -o StrictHostKeyChecking=yes "${PROD_DEPLOY_USER}@${PROD_HOST}" \
+            "mv -- /srv/apps/app-name/.compose.yaml.${DEPLOY_SHA}.tmp /srv/apps/app-name/compose.yaml"
+
+      - name: Deploy and verify health
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_DEPLOY_USER: ${{ secrets.PROD_DEPLOY_USER }}
+          DEPLOY_SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          ssh -o StrictHostKeyChecking=yes "${PROD_DEPLOY_USER}@${PROD_HOST}" "DEPLOY_SHA='${DEPLOY_SHA}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd /srv/apps/app-name
+          if grep -q '^IMAGE_TAG=' .env; then sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=${DEPLOY_SHA}|" .env; else printf '\nIMAGE_TAG=%s\n' "${DEPLOY_SHA}" >> .env; fi
+          docker compose config -q
+          docker compose pull
+          docker compose up -d
+          for attempt in $(seq 1 24); do
+            services="$(docker compose config --services)"; statuses=""
+            while IFS= read -r service; do
+              [ -n "${service}" ] || continue; cid="$(docker compose ps -q "${service}")"
+              if [ -z "${cid}" ]; then statuses="${statuses}${service} missing\n"; else statuses="${statuses}$(docker inspect -f '{{.Name}} {{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${cid}")\n"; fi
+            done <<< "${services}"
+            unhealthy="$(printf '%b' "${statuses}" | awk '$2!="healthy" && $2!="running" {print}')"
+            [ -z "${unhealthy}" ] && { echo "Application containers healthy."; exit 0; }
+            echo "Waiting for application health (${attempt}/24):"; echo "${unhealthy}"; sleep 5
+          done
+          docker compose ps >&2; docker compose logs --tail=50 >&2; exit 1
+          REMOTE

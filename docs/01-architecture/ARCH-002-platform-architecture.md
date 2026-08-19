@@ -300,7 +300,7 @@ sequenceDiagram
 Key constraints on this flow:
 
 - **The image tag is always the Git commit SHA.** The `latest` tag is never used for deployment. This guarantees that the image running in production is traceable to an exact, immutable commit, and that a rollback is simply "deploy the previous SHA."
-- **The production server never runs `docker build`.** Its only responsibilities are `docker compose pull` and `docker compose up -d`, executed over SSH by the workflow's deploy step.
+- **The production server never runs `docker build`.** Its runtime responsibilities are receiving tracked manifests/configuration, then running `docker compose pull` and `docker compose up -d`, executed over SSH by the workflow's deploy step.
 - **The deploy step authenticates using an SSH key**, not a password (Section 11).
 - **Each application repository owns its own workflow file**, but every workflow conforms to this same build → tag → push → deploy contract, per the Standardization principle (Section 2.6).
 
@@ -463,11 +463,15 @@ The platform is designed so that a total loss of the production server is recove
 
 1. Provision a new Ubuntu 24.04 LTS server.
 2. Install Docker Engine, the Compose plugin, and containerd (baseline runtime, Section 5).
-3. Clone `platform-production` and recreate `/srv/platform` and shared networks (Section 9, 10).
-4. Restore encrypted `.env` files and any platform-service configuration from backup into `/srv/platform` and `/srv/apps/<app-name>`.
-5. Restore persistent volumes (database dumps, object storage data) from the latest backup into `/srv/platform` and `/srv/apps/<app-name>/volumes`.
-6. Bring up platform services first (Traefik, monitoring, backup) via `docker compose up -d`, or by re-running the `Deploy Platform` workflow (`workflow_dispatch`, all components) once the server's SSH host key and secrets are re-registered, per [OPS-011, Section 3.2](../04-operations/OPS-011-deploy-platform-service.md#32-manual-trigger-redeploy-without-a-new-change).
-7. For each application, recreate `/srv/apps/<app-name>` and run `docker compose pull && docker compose up -d` pinned to the last known-good commit SHA.
+3. Obtain the bootstrap bundle through the provider console or a trusted
+   workstation, run the two-phase host provisioning procedure, and recreate
+   `/srv/platform` and shared networks through the GitHub Actions platform
+   deployment pipeline (Section 9, 10). The production server does not need a
+   permanent clone of `platform-production`.
+4. Restore encrypted application/platform `.env` files and non-regenerable monitoring state from backup into `/srv/platform` and `/srv/apps/<app-name>`; provision `backup.key` and rclone credentials separately.
+5. Restore PostgreSQL from logical dumps and non-database object-storage data from the latest backup into `/srv/platform` and `/srv/apps/<app-name>/volumes`; never restore a live `db-data` directory.
+6. Restore runtime files, then run the `Deploy Platform` workflow (`workflow_dispatch`, all components) once the server's verified SSH host key and secrets are registered. The workflow deploys `networks` before Traefik/monitoring and applies the remaining components independently, per [OPS-011](../04-operations/OPS-011-deploy-platform-service.md).
+7. For each application, recreate `/srv/apps/<app-name>` and trigger its workflow pinned to the last known-good commit SHA; the workflow syncs the manifest and runs `docker compose pull && docker compose up -d` with health verification.
 8. Validate via Uptime Kuma and Beszel that all platform services and applications are healthy.
 
 **Backup scope:**
@@ -477,7 +481,9 @@ The platform is designed so that a total loss of the production server is recove
 | Application databases | PostgreSQL volumes | Yes — scheduled dump |
 | Object storage | MinIO data | Yes — scheduled sync |
 | Cache | Redis | Only if configured for persistence; otherwise treated as rebuildable |
-| Configuration | `.env` files, Traefik dynamic config | Yes — encrypted |
+| Configuration | Runtime `.env` files | Yes — encrypted; tracked Traefik config is regenerated from Git |
+| Platform runtime state | Monitoring data and platform `.env` files | Yes — encrypted when present |
+| Backup credentials | `backup.key`, rclone config/OAuth | No — provisioned out-of-band |
 | Application source code | N/A | Not applicable — lives in Git, not on the server |
 | Container images | GHCR-hosted images | Not backed up separately — GHCR is the durable store |
 

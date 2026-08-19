@@ -1,0 +1,4 @@
+# Weekly Docker image housekeeping. Commit-SHA image tags make old images
+# safe to remove after the rollback grace period; volumes are never pruned.
+# Logs are outside /srv and are rotated by /etc/logrotate.d/platform.
+0 4 * * 0 /srv/platform/maintenance/cleanup-docker.sh >> /var/log/platform/maintenance.log 2>&1

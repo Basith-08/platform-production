@@ -27,7 +27,7 @@ Applies to every named Docker volume and bind mount declared in any `compose.yam
 1. Every stateful service **must** use a named Docker volume, never an anonymous volume, per [STD-002, Section 3.5](STD-002-naming-convention.md#35-docker-volume-names).
 2. Application volumes **must** map to `/srv/apps/<app-name>/volumes/<volume-name>` on the host. Platform-service volumes **must** map to `/srv/platform/<service>/`. No volume maps outside these two roots.
 3. A volume **must not** be shared between two different applications. Cross-application data sharing, if ever required, goes through a defined API, never a shared volume.
-4. Every volume containing data classified as "Backed Up: Yes" in [ARCH-008, Section 3](../01-architecture/ARCH-008-backup-architecture.md#3-backup-scope) **must** be registered in the corresponding backup job under `infrastructure/backup/` before the application is considered production-ready.
+4. Every non-database volume covered by [ARCH-008, Section 2](../01-architecture/ARCH-008-backup-architecture.md#2-scope) is included by the backup job's default volume rsync. The convention-named `db-data/` volume is explicitly excluded because PostgreSQL is restored from `db.sql`; new volume purposes must be reviewed against ARCH-008 before production.
 5. Volumes **must not** be deleted as a side effect of `docker compose down`; destructive volume removal is a deliberate, separate, documented action per [OPS-010 — Maintenance](../04-operations/OPS-010-maintenance.md), never a default.
 6. Volume names **must** follow `<app-name>-<purpose>`, per [STD-002, Section 3.5](STD-002-naming-convention.md#35-docker-volume-names).
 

@@ -2,11 +2,11 @@
 
 **Status:** Accepted
 
-**Version:** 1.0
+**Version:** 1.1
 
 **Owner:** Platform Team
 
-**Last Updated:** 2026-07-15
+**Last Updated:** 2026-08-20
 
 ---
 
@@ -26,10 +26,10 @@ Platform services differ from applications in one load-bearing way that shapes t
 
 `platform-production` owns a second, independent GitHub Actions pipeline — `.github/workflows/deploy-platform.yml` and the reusable `.github/workflows/deploy-component.yml` it calls — that deploys `infrastructure/<component>` directories to `/srv/platform/<component>` on the production server whenever they change on `main`. This pipeline:
 
-- **never builds anything.** It syncs configuration files with `rsync` and runs `docker compose pull` (pulling the version-pinned public image already referenced in `compose.yaml`) and `docker compose up -d`, per [ADR-0001 — Runtime Only](ADR-0001-runtime-only.md).
+- **never builds anything.** It stages and validates configuration, preserves runtime state, and runs `docker compose pull` (pulling the version-pinned public image already referenced in `compose.yaml`) and `docker compose up -d`, per [ADR-0001 — Runtime Only](ADR-0001-runtime-only.md).
 - **deploys only components that changed**, determined by diffing the triggering push against its parent commit, so a Traefik-only change never touches `monitoring/` or `backup/`.
 - **connects to the same production server, over the same kind of SSH deploy key, as application deployments** (Section 4.1 below), but is a structurally separate workflow from any application's `deploy.yml`, because it deploys a different directory tree (`/srv/platform` vs. `/srv/apps`) governed by a different repository (`platform-production` vs. the application's own repository).
-- is a **reusable workflow** (`workflow_call`) parameterized by component name, invoked once per changed component via a matrix job, so adding a fifth platform service later requires no new workflow file — only a new `infrastructure/<component>/` directory.
+- is a **reusable workflow** (`workflow_call`) parameterized by component name. `networks` is a first-stage prerequisite when selected; unrelated components remain in a fail-fast=false matrix, so adding a fifth platform service later requires no new workflow file — only a new `infrastructure/<component>/` directory.
 
 This does not change how applications deploy. [ADR-0003](ADR-0003-github-actions-deployment.md) and [STD-009](../03-standards/STD-009-github-actions-standard.md) remain the sole path for application deployment, unmodified.
 

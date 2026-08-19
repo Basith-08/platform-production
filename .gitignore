@@ -10,6 +10,11 @@ dashboard-users.htpasswd
 # Backup encryption key referenced by infrastructure/backup
 backup.key
 
+# rclone runtime configuration and backup configuration
+rclone.conf
+*.gpg
+*.tar.gz
+
 # Editor / OS metadata
 .DS_Store
 .vscode/

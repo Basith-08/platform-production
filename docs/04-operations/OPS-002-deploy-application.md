@@ -2,11 +2,11 @@
 
 **Status:** Approved
 
-**Version:** 1.0
+**Version:** 1.1
 
 **Owner:** Platform Team
 
-**Last Updated:** 2026-07-15
+**Last Updated:** 2026-08-20
 
 ---
 
@@ -30,7 +30,11 @@ This procedure covers both the standard automated deployment path and the except
 
 1. Merge a change into the application repository's deploy branch (default `main`).
 2. GitHub Actions triggers automatically: runs tests, builds the image, tags it with the commit SHA, pushes to GHCR.
-3. The workflow's deploy step connects to the production server via SSH and runs `docker compose pull && docker compose up -d` inside `/srv/apps/<app-name>`.
+3. The workflow's deploy step connects to the production server using the
+   verified `PROD_KNOWN_HOSTS` entry, synchronizes the committed
+   `compose.yaml` only, preserves `.env` and volumes, updates `IMAGE_TAG`, then
+   runs `docker compose config`, `pull`, `up -d`, and a bounded health check
+   inside `/srv/apps/<app-name>`.
 4. No manual action is required. Proceed to Section 4 (Verification).
 
 ## 3.2 Onboarding a New Application (First Deployment)
@@ -38,8 +42,10 @@ This procedure covers both the standard automated deployment path and the except
 1. Create the application repository from the appropriate template under `templates/` ([ARCH-003, Section 6](../01-architecture/ARCH-003-directory-structure.md#6-templates-structure-templates)).
 2. On the production server, create `/srv/apps/<app-name>/` and `/srv/apps/<app-name>/volumes/`.
 3. Populate `/srv/apps/<app-name>/.env` from the application's `.env.example`, per [STD-005 — Environment Variables](../03-standards/STD-005-environment-variables.md); set mode `600`.
-4. Copy the application's `compose.yaml` fragment into `/srv/apps/<app-name>/compose.yaml` (this is committed to the application repository and pulled/copied by the deploy step, not hand-edited on the server thereafter).
-5. Add GitHub Actions secrets (`PROD_HOST`, `PROD_DEPLOY_USER`, `PROD_DEPLOY_KEY`) to the application repository.
+4. The first deployment workflow synchronizes the committed `compose.yaml`; do
+   not maintain a separate hand-edited manifest on the server.
+5. Add GitHub Actions secrets (`PROD_HOST`, `PROD_DEPLOY_USER`, `PROD_DEPLOY_KEY`,
+   `PROD_KNOWN_HOSTS`) to the application repository.
 6. Register the application's health endpoint in Uptime Kuma, per [ARCH-009, Section 5](../01-architecture/ARCH-009-monitoring-architecture.md#5-what-is-monitored).
 7. Point DNS for the application's hostname at the production server.
 8. Trigger the first deployment by pushing to the deploy branch (Section 3.1).
@@ -59,7 +65,8 @@ Used only when GitHub Actions is unavailable (see [ARCH-010, Section 4](../01-ar
 
 # 4. Verification
 
-- The deployed container reports `healthy` (`docker compose ps`).
+- Every active service reports `healthy`, or `running` when no healthcheck is
+  defined, within the workflow's bounded health check (`docker compose ps`).
 - Traefik routes requests to the new container (check response headers or a version endpoint if the application exposes one).
 - Uptime Kuma shows the application's monitor as "up" within one polling interval.
 - The GitHub Actions workflow run (standard path) shows a green checkmark.

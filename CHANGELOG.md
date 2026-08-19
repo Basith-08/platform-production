@@ -49,6 +49,29 @@ All notable changes to this repository are documented in this file. Format follo
 
 ---
 
-## [Unreleased]
+## [1.2.0] — 2026-08-20
 
-Nothing yet. See [ROADMAP v2](docs/05-roadmap/ROADMAP-v2.md) for planned next-scope candidates.
+### Added
+
+- Two-phase Ubuntu provisioning (`bootstrap.sh provision` then explicit
+  `harden`) with structured failure reporting, separate `admin`/`deploy`
+  identities, deterministic hostname support, and SSH syntax validation before
+  `ssh.service` reload.
+- Pinned rclone `1.75.0` GitHub release installation with bounded retries,
+  official SHA256SUMS verification, atomic installation, and idempotent version
+  checks.
+- Read-only `platform-doctor.sh` and automation behavior tests.
+- Idempotent Traefik and monitoring runtime preparation scripts.
+
+### Changed
+
+- Platform deployment stages and validates component configuration, protects
+  runtime state, orders `networks` before selected dependents, uses pinned
+  `PROD_KNOWN_HOSTS`, and reports bounded health diagnostics.
+- Application templates synchronize committed `compose.yaml` manifests while
+  preserving runtime `.env` and volumes, then perform bounded health checks.
+- OPS/ARCH/ADR/STD documentation now describes the two-phase bootstrap,
+  separate operator/CI credentials, host-key pinning, runtime inventory, and
+  GitHub Actions-only runtime synchronization.
+
+See [ROADMAP v2](docs/05-roadmap/ROADMAP-v2.md) for planned next-scope candidates.
