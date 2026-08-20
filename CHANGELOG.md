@@ -62,6 +62,7 @@ All notable changes to this repository are documented in this file. Format follo
   checks.
 - Read-only `platform-doctor.sh` and automation behavior tests.
 - Idempotent Traefik and monitoring runtime preparation scripts.
+- OPS-014 first-platform-deployment runbook with the tested fresh-server path.
 
 ### Changed
 

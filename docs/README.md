@@ -95,6 +95,8 @@ Documentation is organized into six categories, per [ARCH-003 — Directory Stru
 | OPS-010 | [Maintenance](04-operations/OPS-010-maintenance.md) |
 | OPS-011 | [Deploy Platform Service](04-operations/OPS-011-deploy-platform-service.md) |
 | OPS-012 | [Migrate VPS Provider](04-operations/OPS-012-migrate-vps-provider.md) |
+| OPS-013 | [Manual Configuration Inventory](04-operations/OPS-013-manual-configuration-inventory.md) |
+| OPS-014 | [First Platform Deployment](04-operations/OPS-014-first-platform-deployment.md) |
 
 ---
 

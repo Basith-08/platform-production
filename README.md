@@ -129,6 +129,29 @@ Explicitly **not** part of the stack: Kubernetes, Docker Swarm, Portainer. See [
 
 ## Quick Start
 
+For the complete fresh-server walkthrough, use
+[OPS-014 — First Platform Deployment](docs/04-operations/OPS-014-first-platform-deployment.md).
+
+The short sequence is:
+
+```text
+generate admin/deploy keys
+        ↓
+bootstrap provision
+        ↓
+test admin and deploy SSH
+        ↓
+bootstrap harden
+        ↓
+configure PROD_* secrets and runtime files
+        ↓
+Deploy Platform: networks → Traefik/monitoring
+        ↓
+configure DNS, TLS, Beszel, and backup
+        ↓
+platform-doctor full
+```
+
 **Provisioning a new production server:**
 
 ```text
@@ -155,6 +178,8 @@ Add `PROD_HOST`, `PROD_DEPLOY_USER`, `PROD_DEPLOY_KEY`, and verified
 then push to `main` (or run the `Deploy Platform` workflow manually) to bring
 up platform components — see [ADR-0011](docs/02-decisions/ADR-0011-platform-service-deployment-pipeline.md)
 and [OPS-011 — Deploy Platform Service](docs/04-operations/OPS-011-deploy-platform-service.md).
+For the first deployment, use the manual workflow. Enable `skip_backup` only
+while the backup runtime files are not ready.
 `docker compose up -d` run by hand on the server remains only the documented
 emergency fallback.
 
@@ -180,7 +205,7 @@ The full documentation set lives in [`docs/`](docs/README.md), organized as:
 | [01-architecture/](docs/01-architecture/) | What the platform is and why it is shaped this way (`ARCH-001`–`ARCH-010`) |
 | [02-decisions/](docs/02-decisions/) | Architecture Decision Records — the specific choices behind the architecture (`ADR-0001`–`ADR-0011`) |
 | [03-standards/](docs/03-standards/) | Enforceable, checkable engineering standards (`STD-001`–`STD-011`) |
-| [04-operations/](docs/04-operations/) | Step-by-step operational runbooks (`OPS-001`–`OPS-011`) |
+| [04-operations/](docs/04-operations/) | Step-by-step operational runbooks (`OPS-001`–`OPS-014`) |
 | [05-roadmap/](docs/05-roadmap/) | Shipped scope, planned scope, and known gaps |
 
 Start with [ARCH-001 — Platform Vision](docs/01-architecture/ARCH-001-platform-vision.md) and [ARCH-002 — Platform Architecture](docs/01-architecture/ARCH-002-platform-architecture.md) for the complete picture.
