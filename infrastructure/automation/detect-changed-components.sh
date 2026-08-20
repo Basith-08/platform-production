@@ -89,6 +89,19 @@ else
   fi
 fi
 
+if [ "${SKIP_BACKUP:-false}" = "true" ]; then
+  if [ "${EVENT_NAME:-}" != "workflow_dispatch" ]; then
+    echo "SKIP_BACKUP is only allowed for a manual workflow dispatch." >&2
+    exit 1
+  fi
+  if [ "${MANUAL_COMPONENT:-}" = "backup" ]; then
+    echo "Cannot select component=backup and skip_backup=true together." >&2
+    exit 1
+  fi
+  selected="$(grep -vx 'backup' <<< "${selected}" || true)"
+  echo "Backup skipped for this manual run; provision its runtime files before deploying it." >&2
+fi
+
 json_array() {
   local values="$1"
   if [ -z "${values}" ]; then

@@ -55,7 +55,11 @@ application source code.
 Run `Deploy Platform` with `component` set to one component for a single
 deployment. Leave it blank for a full resync. A full resync still orders
 `networks` before Traefik/monitoring; unrelated components remain independent
-after that prerequisite.
+after that prerequisite. During initial provisioning, when backup's
+out-of-band runtime files are not ready yet, a manual run may enable
+`skip_backup`; this option is intentionally unavailable to push deployments
+and must be disabled after `/srv/platform/backup/backup.env`, `backup.key`,
+and the rclone config are provisioned.
 
 ## 3.3 First deployment and runtime files
 

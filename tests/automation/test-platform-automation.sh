@@ -47,6 +47,11 @@ missing_before_log="${test_dir}/missing-before.log"
 assert_contains 'components=["backup","maintenance","monitoring","networks","traefik"]' "${missing_before_output}"
 grep -q 'is unavailable in this checkout' "${missing_before_log}"
 
+skip_backup_output="${test_dir}/skip-backup.output"
+EVENT_NAME=workflow_dispatch MANUAL_COMPONENT='' SKIP_BACKUP=true GITHUB_OUTPUT="${skip_backup_output}" \
+  "${repo_root}/infrastructure/automation/detect-changed-components.sh" >/dev/null
+assert_contains 'components=["maintenance","monitoring","networks","traefik"]' "${skip_backup_output}"
+
 mock_bin="${test_dir}/bin"
 install_root="${test_dir}/install"
 mkdir -p "${mock_bin}" "${install_root}"

@@ -30,6 +30,11 @@ on:
         description: "Deploy a single component only (e.g. traefik, monitoring, backup, maintenance, networks). Leave blank to deploy every component that changed in the most recent push, or every component if no prior push context is available."
         required: false
         type: string
+      skip_backup:
+        description: "Temporarily skip backup while its out-of-band runtime configuration is being prepared. Manual runs only."
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -62,6 +67,7 @@ jobs:
           BEFORE_SHA: ${{ github.event.before }}
           AFTER_SHA: ${{ github.sha }}
           MANUAL_COMPONENT: ${{ github.event.inputs.component }}
+          SKIP_BACKUP: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.skip_backup == 'true' }}
 
   deploy_networks:
     name: Deploy networks first
