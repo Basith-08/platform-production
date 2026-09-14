@@ -23,9 +23,3 @@ rclone.conf
 
 # Local scratch state
 *.log
-
-# Local VPS action audit — contains operational history and stays outside the
-# public repository.
-dokumentasi_cloude_vps_kagami.txt
-panduan_end_to_end_civialert.txt
-panduan_umum_deploy_aplikasi_vps.txt

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create encrypted application/platform archives and upload them to rclone.
+# Create encrypted application/platform archives and upload them to Telegram.
 # Usage: run-backup.sh [app-name]
 
 set -euo pipefail
@@ -23,13 +23,13 @@ trap cleanup_plaintext EXIT
 
 load_backup_config
 validate_backup_config
+command -v curl >/dev/null 2>&1 || { echo "curl is not installed." >&2; exit 1; }
+validate_telegram_api
 command -v docker >/dev/null 2>&1 || { echo "Docker is not installed." >&2; exit 1; }
 docker compose version >/dev/null
 command -v gpg >/dev/null 2>&1 || { echo "gpg is not installed." >&2; exit 1; }
 command -v rsync >/dev/null 2>&1 || { echo "rsync is not installed." >&2; exit 1; }
-command -v rclone >/dev/null 2>&1 || { echo "rclone is not installed." >&2; exit 1; }
 command -v flock >/dev/null 2>&1 || { echo "flock is not installed." >&2; exit 1; }
-validate_rclone_remote
 
 mkdir -p -- "${STAGING_DIR}"
 [ -d "${APPS_DIR}" ] || { echo "Applications directory not found: ${APPS_DIR}" >&2; exit 1; }
@@ -68,13 +68,7 @@ archive_and_upload() {
 
 transfer_archive() {
   local archive="$1" app_name="$2"
-  "${SCRIPT_DIR}/transfer-offsite.sh" "${archive}" "${app_name}" daily
-  if [ "$(date -u +%u)" -eq 7 ]; then
-    "${SCRIPT_DIR}/transfer-offsite.sh" "${archive}" "${app_name}" weekly
-  fi
-  if [ "$(date -u +%d)" -eq 01 ]; then
-    "${SCRIPT_DIR}/transfer-offsite.sh" "${archive}" "${app_name}" monthly
-  fi
+  "${SCRIPT_DIR}/transfer-telegram.sh" "${archive}" "${app_name}"
 }
 
 backup_app() {
@@ -176,5 +170,4 @@ else
 fi
 
 backup_platform
-"${SCRIPT_DIR}/prune-backups.sh"
 echo "Backup run complete."

@@ -25,46 +25,44 @@ else
 fi
 check_command GPG gpg
 check_command rsync rsync
-check_command rclone rclone
+check_command curl curl
+check_command Python3 python3
 
 if [ -r "${BACKUP_ENV_FILE}" ]; then
   ok "backup.env (${BACKUP_ENV_FILE})"
   # shellcheck disable=SC1090
   . "${BACKUP_ENV_FILE}"
-  RCLONE_REMOTE="${RCLONE_REMOTE:-}"
-  RCLONE_BASE_PATH="${RCLONE_BASE_PATH:-}"
-  RCLONE_CONFIG="${RCLONE_CONFIG:-/home/deploy/.config/rclone/rclone.conf}"
+  TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+  TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
   BACKUP_MIN_FREE_GB="${BACKUP_MIN_FREE_GB:-3}"
+  TELEGRAM_RETRIES="${TELEGRAM_RETRIES:-3}"
+  TELEGRAM_RETRY_DELAY_SECONDS="${TELEGRAM_RETRY_DELAY_SECONDS:-10}"
+  TELEGRAM_MAX_FILE_MB="${TELEGRAM_MAX_FILE_MB:-49}"
+  TELEGRAM_API_BASE="${TELEGRAM_API_BASE:-https://api.telegram.org}"
 else
   fail "backup.env (${BACKUP_ENV_FILE})"
 fi
 
-if [ -s "${BACKUP_KEY_FILE}" ] && ! find "${BACKUP_KEY_FILE}" -prune -perm /077 -print -quit | grep -q .; then
-  ok "backup.key exists with restrictive permissions"
+if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]   && [[ "${TELEGRAM_CHAT_ID}" =~ ^-?[0-9]+$ ]]   && [[ "${TELEGRAM_API_BASE}" == https://* ]]; then
+  ok "Telegram configuration"
 else
-  fail "backup.key exists with restrictive permissions"
+  fail "Telegram configuration"
 fi
 
-if [ -r "${RCLONE_CONFIG}" ] && ! find "${RCLONE_CONFIG}" -prune -perm /077 -print -quit | grep -q .; then
-  ok "rclone config exists with restrictive permissions"
-else
-  fail "rclone config exists with restrictive permissions (${RCLONE_CONFIG})"
-fi
-
-if command -v rclone >/dev/null 2>&1 && [ -r "${RCLONE_CONFIG}" ]; then
-  if remotes="$(rclone --config "${RCLONE_CONFIG}" listremotes 2>/dev/null)" \
-    && grep -Fxq "${RCLONE_REMOTE}:" <<< "${remotes}"; then
-    ok "Configured rclone remote (${RCLONE_REMOTE})"
-    if rclone --config "${RCLONE_CONFIG}" lsd "${RCLONE_REMOTE}:" >/dev/null 2>&1; then
-      ok "Google Drive remote"
-    else
-      fail "Google Drive remote is not reachable"
-    fi
+if command -v curl >/dev/null 2>&1 && [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+  if curl --fail --silent --show-error --connect-timeout 10 --max-time 30     "${TELEGRAM_API_BASE}/bot${TELEGRAM_BOT_TOKEN}/getMe" | grep -q '"ok":true'; then
+    ok "Telegram Bot API"
   else
-    fail "Configured rclone remote (${RCLONE_REMOTE})"
+    fail "Telegram Bot API"
   fi
 else
-  fail "Configured rclone remote"
+  fail "Telegram Bot API"
+fi
+
+if [ -n "${TELEGRAM_CHAT_ID:-}" ] && [[ "${TELEGRAM_CHAT_ID}" =~ ^-?[0-9]+$ ]]; then
+  ok "Telegram chat ID format"
+else
+  fail "Telegram chat ID format"
 fi
 
 if [ -d "${STAGING_DIR}" ] && [ -w "${STAGING_DIR}" ]; then ok "Staging writable (${STAGING_DIR})"; else fail "Staging writable (${STAGING_DIR})"; fi

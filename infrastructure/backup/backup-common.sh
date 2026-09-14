@@ -8,12 +8,13 @@ BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-${BACKUP_RUNTIME_DIR}/backup.env}"
 BACKUP_KEY_FILE="${BACKUP_KEY_FILE:-${BACKUP_RUNTIME_DIR}/backup.key}"
 STAGING_DIR="${STAGING_DIR:-${BACKUP_RUNTIME_DIR}/staging}"
 APPS_DIR="${APPS_DIR:-/srv/apps}"
-RCLONE_REMOTE="${RCLONE_REMOTE:-}"
-RCLONE_BASE_PATH="${RCLONE_BASE_PATH:-}"
-RCLONE_CONFIG="${RCLONE_CONFIG:-/home/deploy/.config/rclone/rclone.conf}"
+TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 BACKUP_MIN_FREE_GB="${BACKUP_MIN_FREE_GB:-3}"
-RCLONE_RETRIES="${RCLONE_RETRIES:-3}"
-RCLONE_RETRY_DELAY_SECONDS="${RCLONE_RETRY_DELAY_SECONDS:-10}"
+TELEGRAM_RETRIES="${TELEGRAM_RETRIES:-3}"
+TELEGRAM_RETRY_DELAY_SECONDS="${TELEGRAM_RETRY_DELAY_SECONDS:-10}"
+TELEGRAM_MAX_FILE_MB="${TELEGRAM_MAX_FILE_MB:-49}"
+TELEGRAM_API_BASE="${TELEGRAM_API_BASE:-https://api.telegram.org}"
 
 load_backup_config() {
   if [ ! -r "${BACKUP_ENV_FILE}" ]; then
@@ -26,12 +27,13 @@ load_backup_config() {
   # shellcheck disable=SC1090
   . "${BACKUP_ENV_FILE}"
 
-  RCLONE_REMOTE="${RCLONE_REMOTE:-}"
-  RCLONE_BASE_PATH="${RCLONE_BASE_PATH:-}"
-  RCLONE_CONFIG="${RCLONE_CONFIG:-/home/deploy/.config/rclone/rclone.conf}"
+  TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+  TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
   BACKUP_MIN_FREE_GB="${BACKUP_MIN_FREE_GB:-3}"
-  RCLONE_RETRIES="${RCLONE_RETRIES:-3}"
-  RCLONE_RETRY_DELAY_SECONDS="${RCLONE_RETRY_DELAY_SECONDS:-10}"
+  TELEGRAM_RETRIES="${TELEGRAM_RETRIES:-3}"
+  TELEGRAM_RETRY_DELAY_SECONDS="${TELEGRAM_RETRY_DELAY_SECONDS:-10}"
+  TELEGRAM_MAX_FILE_MB="${TELEGRAM_MAX_FILE_MB:-49}"
+  TELEGRAM_API_BASE="${TELEGRAM_API_BASE:-https://api.telegram.org}"
 }
 
 validate_integer() {
@@ -50,43 +52,44 @@ validate_app_name() {
   fi
 }
 
-validate_rclone_config() {
+validate_telegram_config() {
   validate_integer BACKUP_MIN_FREE_GB "${BACKUP_MIN_FREE_GB}"
-  validate_integer RCLONE_RETRIES "${RCLONE_RETRIES}"
-  validate_integer RCLONE_RETRY_DELAY_SECONDS "${RCLONE_RETRY_DELAY_SECONDS}"
-  [ "${RCLONE_RETRIES}" -gt 0 ] || {
-    echo "RCLONE_RETRIES must be greater than zero." >&2
-    return 1
-  }
+  validate_integer TELEGRAM_RETRIES "${TELEGRAM_RETRIES}"
+  validate_integer TELEGRAM_RETRY_DELAY_SECONDS "${TELEGRAM_RETRY_DELAY_SECONDS}"
+  validate_integer TELEGRAM_MAX_FILE_MB "${TELEGRAM_MAX_FILE_MB}"
 
-  [ -n "${RCLONE_REMOTE}" ] || {
-    echo "RCLONE_REMOTE must not be empty." >&2
+  [ "${TELEGRAM_RETRIES}" -gt 0 ] || {
+    echo "TELEGRAM_RETRIES must be greater than zero." >&2
     return 1
   }
-  if ! [[ "${RCLONE_REMOTE}" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
-    echo "RCLONE_REMOTE contains unsupported characters: ${RCLONE_REMOTE}" >&2
-    return 1
-  fi
-
-  [ -n "${RCLONE_BASE_PATH}" ] || {
-    echo "RCLONE_BASE_PATH must not be empty." >&2
+  [ "${TELEGRAM_MAX_FILE_MB}" -gt 0 ] || {
+    echo "TELEGRAM_MAX_FILE_MB must be greater than zero." >&2
     return 1
   }
-  case "${RCLONE_BASE_PATH}" in
-    /*|*/|*//*|*:*|.|..|../*|*/../*|*/..)
-      echo "RCLONE_BASE_PATH is not a safe remote-relative path: ${RCLONE_BASE_PATH}" >&2
-      return 1
-      ;;
+  [ -n "${TELEGRAM_BOT_TOKEN}" ] || {
+    echo "TELEGRAM_BOT_TOKEN must not be empty." >&2
+    return 1
+  }
+  [ -n "${TELEGRAM_CHAT_ID}" ] || {
+    echo "TELEGRAM_CHAT_ID must not be empty." >&2
+    return 1
+  }
+  [[ "${TELEGRAM_CHAT_ID}" =~ ^-?[0-9]+$ ]] || {
+    echo "TELEGRAM_CHAT_ID must be a numeric Telegram chat ID." >&2
+    return 1
+  }
+  [[ "${TELEGRAM_BOT_TOKEN}" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]] || {
+    echo "TELEGRAM_BOT_TOKEN has an unexpected format." >&2
+    return 1
+  }
+  case "${TELEGRAM_API_BASE}" in
+    https://*) ;;
+    *) echo "TELEGRAM_API_BASE must use HTTPS." >&2; return 1 ;;
   esac
-
-  [ -r "${RCLONE_CONFIG}" ] || {
-    echo "rclone config is not readable: ${RCLONE_CONFIG}" >&2
-    return 1
-  }
 }
 
 validate_backup_config() {
-  validate_rclone_config
+  validate_telegram_config
   [ -s "${BACKUP_KEY_FILE}" ] || {
     echo "Backup encryption key is missing or empty: ${BACKUP_KEY_FILE}" >&2
     return 1
@@ -97,19 +100,15 @@ validate_backup_config() {
   fi
 }
 
-validate_rclone_remote() {
-  local remotes
-  remotes="$(rclone --config "${RCLONE_CONFIG}" listremotes)" || {
-    echo "Unable to list rclone remotes using ${RCLONE_CONFIG}." >&2
-    return 1
-  }
-  if ! grep -Fxq "${RCLONE_REMOTE}:" <<< "${remotes}"; then
-    echo "Configured rclone remote is unavailable: ${RCLONE_REMOTE}" >&2
-    echo "Available remotes: ${remotes//$'\n'/ }" >&2
-    return 1
-  fi
-  rclone --config "${RCLONE_CONFIG}" lsd "${RCLONE_REMOTE}:" >/dev/null || {
-    echo "Google Drive remote cannot be accessed: ${RCLONE_REMOTE}" >&2
+validate_telegram_api() {
+  local response
+  response="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+    "${TELEGRAM_API_BASE}/bot${TELEGRAM_BOT_TOKEN}/getMe")" || {
+      echo "Telegram Bot API is not reachable." >&2
+      return 1
+    }
+  grep -q '"ok":true' <<< "${response}" || {
+    echo "Telegram Bot API rejected the bot token." >&2
     return 1
   }
 }
@@ -119,20 +118,6 @@ validate_tier() {
     daily|weekly|monthly) return 0 ;;
     *) echo "Invalid backup tier: $1" >&2; return 1 ;;
   esac
-}
-
-validate_remote_object_target() {
-  local app_name="$1" tier="$2"
-  validate_app_name "${app_name}"
-  validate_tier "${tier}"
-  [ -n "${RCLONE_REMOTE}" ] || { echo "RCLONE_REMOTE is empty." >&2; return 1; }
-  [ -n "${RCLONE_BASE_PATH}" ] || { echo "RCLONE_BASE_PATH is empty." >&2; return 1; }
-}
-
-remote_tier_path() {
-  local tier="$1" app_name="$2"
-  validate_remote_object_target "${app_name}" "${tier}"
-  printf '%s:%s/%s/%s' "${RCLONE_REMOTE}" "${RCLONE_BASE_PATH}" "${tier}" "${app_name}"
 }
 
 free_bytes() {
