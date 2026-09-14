@@ -63,7 +63,6 @@ validate_runtime_configuration() {
     backup)
       require_runtime_file "${COMPONENT_DIR}/backup.env" "infrastructure/backup/backup.env.example"
       require_runtime_file "${COMPONENT_DIR}/backup.key" "out-of-band backup key"
-      require_runtime_file "/home/deploy/.config/rclone/rclone.conf" "out-of-band rclone config"
       ;;
   esac
 }
