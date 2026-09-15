@@ -6,6 +6,11 @@ set -euo pipefail
 umask 077
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+export GNUPGHOME="${BACKUP_GNUPGHOME:-${SCRIPT_DIR}/.gnupg}"
+mkdir -p -- "${GNUPGHOME}"
+chmod 700 "${GNUPGHOME}"
+
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/backup-common.sh"
 
