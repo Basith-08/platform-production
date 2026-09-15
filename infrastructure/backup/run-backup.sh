@@ -77,51 +77,120 @@ transfer_archive() {
 }
 
 backup_app() {
-  local app_name="$1" app_dir="$2" app_staging services db_container db_name
+
+  local app_name="$1" app_dir="$2" app_staging services db_service db_container db_name image
+
   app_staging="${STAGING_DIR}/${app_name}-${TIMESTAMP}"
 
   echo "Backing up application ${app_name}..."
+
   mkdir -p -- "${app_staging}"
+
   CURRENT_PLAINTEXT_DIR="${app_staging}"
 
-  services="$(docker compose -f "${app_dir}/compose.yaml" --env-file "${app_dir}/.env" config --services)"
-  if grep -Fxq db <<< "${services}"; then
-    db_container="$(docker compose -f "${app_dir}/compose.yaml" --env-file "${app_dir}/.env" ps -q db)"
+  services="$(
+    docker compose \
+      -f "${app_dir}/compose.yaml" \
+      --env-file "${app_dir}/.env" \
+      config --services
+  )"
+
+  db_service=""
+
+  while IFS= read -r service; do
+    [ -n "${service}" ] || continue
+
+    image="$(
+      docker compose \
+        -f "${app_dir}/compose.yaml" \
+        --env-file "${app_dir}/.env" \
+        config --format json |
+      jq -r --arg service "${service}" \
+        '.services[$service].image // empty'
+    )"
+
+    case "${image}" in
+      postgres|postgres:*)
+        db_service="${service}"
+        break
+        ;;
+    esac
+  done <<< "${services}"
+
+  if [ -n "${db_service}" ]; then
+
+    echo "Detected PostgreSQL service: ${db_service}"
+
+    db_container="$(
+      docker compose \
+        -f "${app_dir}/compose.yaml" \
+        --env-file "${app_dir}/.env" \
+        ps -q "${db_service}"
+    )"
+
     [ -n "${db_container}" ] || {
-      echo "PostgreSQL service db exists but has no container for ${app_name}." >&2
+      echo "PostgreSQL service ${db_service} exists but has no container for ${app_name}." >&2
       return 1
     }
+
     [ "$(docker inspect -f '{{.State.Running}}' "${db_container}")" = true ] || {
       echo "PostgreSQL container for ${app_name} is not running." >&2
       return 1
     }
-    db_name="$(docker compose -f "${app_dir}/compose.yaml" --env-file "${app_dir}/.env" exec -T db \
-      sh -lc 'printf "%s" "${POSTGRES_DB:-}"')"
+
+    db_name="$(
+      docker compose \
+        -f "${app_dir}/compose.yaml" \
+        --env-file "${app_dir}/.env" \
+        exec -T "${db_service}" \
+        sh -lc 'printf "%s" "${POSTGRES_DB:-}"'
+    )"
+
     [ -n "${db_name}" ] || {
       echo "PostgreSQL container for ${app_name} has no POSTGRES_DB." >&2
       return 1
     }
+
     echo "Dumping PostgreSQL database ${db_name} for ${app_name}..."
-    if ! docker compose -f "${app_dir}/compose.yaml" --env-file "${app_dir}/.env" exec -T db \
+
+    if ! docker compose \
+      -f "${app_dir}/compose.yaml" \
+      --env-file "${app_dir}/.env" \
+      exec -T "${db_service}" \
       sh -lc 'test -n "${POSTGRES_USER:-}" && test -n "${POSTGRES_DB:-}" && pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
       > "${app_staging}/db.sql"; then
+
       echo "PostgreSQL dump failed for ${app_name}; application backup aborted." >&2
       return 1
     fi
+
     [ -s "${app_staging}/db.sql" ] || {
       echo "PostgreSQL dump is zero-byte for ${app_name}; application backup aborted." >&2
       return 1
     }
+
+  else
+
+    echo "No PostgreSQL service detected for ${app_name}; skipping database dump."
+
   fi
 
   if [ -d "${app_dir}/volumes" ]; then
+
     echo "Copying non-database persistent volumes for ${app_name}..."
+
     mkdir -p -- "${app_staging}/volumes"
-    rsync -a --exclude='db-data/' "${app_dir}/volumes/" "${app_staging}/volumes/"
+
+    rsync -a --exclude='db-data/' \
+      "${app_dir}/volumes/" \
+      "${app_staging}/volumes/"
+
   fi
 
   cp -- "${app_dir}/.env" "${app_staging}/.env"
+
   archive_and_upload "${app_name}" "${app_staging}"
+
 }
 
 backup_platform() {
@@ -134,7 +203,7 @@ backup_platform() {
   [ -f /srv/platform/monitoring/.env ] && cp -- /srv/platform/monitoring/.env "${platform_staging}/monitoring/.env"
   for data_dir in /srv/platform/monitoring/beszel-data /srv/platform/monitoring/kuma-data; do
     if [ -d "${data_dir}" ]; then
-      rsync -a -- "${data_dir}/" "${platform_staging}/monitoring/$(basename -- "${data_dir}")/"
+      rsync -a --exclude='id_ed25519' -- "${data_dir}/" "${platform_staging}/monitoring/$(basename -- "${data_dir}")/"
     fi
   done
 
